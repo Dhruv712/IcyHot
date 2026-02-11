@@ -6,8 +6,6 @@ import {
   forceRadial,
   forceManyBody,
   forceCollide,
-  forceX,
-  forceY,
   type Simulation,
 } from "d3-force";
 import type { GraphNode } from "./types";
@@ -15,97 +13,117 @@ import type { GraphNode } from "./types";
 interface UseForceSimulationOptions {
   width: number;
   height: number;
-  onTick: () => void;
+  dpr: number;
 }
 
 export function useForceSimulation({
   width,
   height,
-  onTick,
+  dpr,
 }: UseForceSimulationOptions) {
   const simulationRef = useRef<Simulation<GraphNode, undefined> | null>(null);
   const nodesRef = useRef<GraphNode[]>([]);
-  const onTickRef = useRef(onTick);
-  onTickRef.current = onTick;
 
-  const centerX = width / 2;
-  const centerY = height / 2;
+  // Store center coords in a ref so callbacks stay stable
+  const centerRef = useRef({ x: width / 2, y: height / 2 });
+  centerRef.current = { x: width / 2, y: height / 2 };
 
-  const updateNodes = useCallback(
-    (newNodes: GraphNode[]) => {
-      // Preserve positions of existing nodes
-      const existingPositions = new Map<
-        string,
-        { x: number; y: number; vx: number; vy: number }
-      >();
-      for (const node of nodesRef.current) {
-        if (node.x !== undefined && node.y !== undefined) {
-          existingPositions.set(node.id, {
-            x: node.x,
-            y: node.y,
-            vx: node.vx ?? 0,
-            vy: node.vy ?? 0,
-          });
-        }
+  const dprRef = useRef(dpr);
+  dprRef.current = dpr;
+
+  // Stable updateNodes — never recreated, reads center from ref
+  const updateNodes = useCallback((newNodes: GraphNode[]) => {
+    const cx = centerRef.current.x;
+    const cy = centerRef.current.y;
+    const currentDpr = dprRef.current;
+
+    // Preserve positions of existing nodes
+    const existingPositions = new Map<
+      string,
+      { x: number; y: number; vx: number; vy: number }
+    >();
+    for (const node of nodesRef.current) {
+      if (node.x !== undefined && node.y !== undefined) {
+        existingPositions.set(node.id, {
+          x: node.x,
+          y: node.y,
+          vx: node.vx ?? 0,
+          vy: node.vy ?? 0,
+        });
       }
+    }
 
-      // Merge positions into new nodes
-      const meNode: GraphNode = {
-        id: "me",
-        name: "Me",
-        temperature: 1,
-        importance: 10,
-        orbitalRadius: 0,
-        nodeRadius: 24,
-        color: "#f5f5f5",
-        mass: 10,
-        groupId: null,
-        groupAngle: null,
-        lastInteraction: null,
-        nudgeScore: 0,
-        interactionCount: 0,
-        relationshipType: "other",
-        x: centerX,
-        y: centerY,
-        fx: centerX,
-        fy: centerY,
-      };
+    // Scale node radii by DPR so they appear correct on HiDPI
+    const scaledNodes = newNodes.map((node) => ({
+      ...node,
+      nodeRadius: node.nodeRadius * currentDpr,
+      orbitalRadius: node.orbitalRadius * currentDpr,
+    }));
 
-      const mergedNodes = [meNode, ...newNodes].map((node) => {
-        const existing = existingPositions.get(node.id);
-        if (existing && node.id !== "me") {
-          return { ...node, x: existing.x, y: existing.y, vx: existing.vx, vy: existing.vy };
-        }
-        if (node.id !== "me" && node.x === undefined) {
-          // Place new nodes at a random position near their orbit
-          const angle = Math.random() * Math.PI * 2;
-          return {
-            ...node,
-            x: centerX + Math.cos(angle) * node.orbitalRadius,
-            y: centerY + Math.sin(angle) * node.orbitalRadius,
-          };
-        }
-        return node;
-      });
+    // Create "Me" center node
+    const meNode: GraphNode = {
+      id: "me",
+      name: "Me",
+      temperature: 1,
+      importance: 10,
+      orbitalRadius: 0,
+      nodeRadius: 32 * currentDpr,
+      color: "#f5f5f5",
+      mass: 10,
+      groupId: null,
+      groupAngle: null,
+      lastInteraction: null,
+      nudgeScore: 0,
+      interactionCount: 0,
+      relationshipType: "other",
+      x: cx,
+      y: cy,
+      fx: cx,
+      fy: cy,
+    };
 
-      nodesRef.current = mergedNodes;
-
-      if (simulationRef.current) {
-        simulationRef.current.nodes(mergedNodes);
-        simulationRef.current.alpha(0.3).restart();
+    const mergedNodes = [meNode, ...scaledNodes].map((node) => {
+      const existing = existingPositions.get(node.id);
+      if (existing && node.id !== "me") {
+        return {
+          ...node,
+          x: existing.x,
+          y: existing.y,
+          vx: existing.vx,
+          vy: existing.vy,
+        };
       }
-    },
-    [centerX, centerY]
-  );
+      if (node.id !== "me" && node.x === undefined) {
+        const angle = Math.random() * Math.PI * 2;
+        return {
+          ...node,
+          x: cx + Math.cos(angle) * node.orbitalRadius,
+          y: cy + Math.sin(angle) * node.orbitalRadius,
+        };
+      }
+      return node;
+    });
 
+    nodesRef.current = mergedNodes;
+
+    if (simulationRef.current) {
+      simulationRef.current.nodes(mergedNodes);
+      simulationRef.current.alpha(0.3).restart();
+    }
+  }, []); // Stable — uses refs, never recreated
+
+  // Create simulation ONCE on mount
   useEffect(() => {
+    const cx = centerRef.current.x;
+    const cy = centerRef.current.y;
+
     const sim = forceSimulation<GraphNode>(nodesRef.current)
       .force(
         "radial",
         forceRadial<GraphNode>(
           (d) => (d.id === "me" ? 0 : d.orbitalRadius),
-          centerX,
-          centerY
+          cx,
+          cy
         ).strength(0.08)
       )
       .force(
@@ -120,23 +138,23 @@ export function useForceSimulation({
           .radius((d) => d.nodeRadius + 4)
           .strength(0.7)
       )
-      .force(
-        "groupCluster",
-        groupClusterForce(centerX, centerY, 0.02)
-      )
+      .force("groupCluster", groupClusterForce(centerRef, 0.02))
       .alphaDecay(0.005)
       .alphaTarget(0.02)
-      .velocityDecay(0.3)
-      .on("tick", () => onTickRef.current());
+      .velocityDecay(0.3);
 
     simulationRef.current = sim;
 
     return () => {
       sim.stop();
     };
-  }, [centerX, centerY]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Update forces when dimensions change
+  // Update forces when dimensions change (without recreating simulation)
+  const centerX = width / 2;
+  const centerY = height / 2;
+
   useEffect(() => {
     const sim = simulationRef.current;
     if (!sim) return;
@@ -150,6 +168,8 @@ export function useForceSimulation({
       ).strength(0.08)
     );
 
+    sim.force("groupCluster", groupClusterForce(centerRef, 0.02));
+
     // Update the "me" node position
     const meNode = nodesRef.current.find((n) => n.id === "me");
     if (meNode) {
@@ -157,29 +177,25 @@ export function useForceSimulation({
       meNode.fy = centerY;
     }
 
-    sim
-      .force("groupCluster", groupClusterForce(centerX, centerY, 0.02))
-      .alpha(0.3)
-      .restart();
+    sim.alpha(0.3).restart();
   }, [centerX, centerY]);
 
   return { nodesRef, simulationRef, updateNodes };
 }
 
 function groupClusterForce(
-  centerX: number,
-  centerY: number,
+  centerRef: React.RefObject<{ x: number; y: number }>,
   strength: number = 0.02
 ) {
   let nodes: GraphNode[];
 
   const force = (alpha: number) => {
+    const cx = centerRef.current.x;
+    const cy = centerRef.current.y;
     for (const node of nodes) {
       if (!node.groupAngle || node.id === "me") continue;
-      const targetX =
-        centerX + Math.cos(node.groupAngle) * node.orbitalRadius;
-      const targetY =
-        centerY + Math.sin(node.groupAngle) * node.orbitalRadius;
+      const targetX = cx + Math.cos(node.groupAngle) * node.orbitalRadius;
+      const targetY = cy + Math.sin(node.groupAngle) * node.orbitalRadius;
       node.vx! += (targetX - node.x!) * strength * alpha;
       node.vy! += (targetY - node.y!) * strength * alpha;
     }

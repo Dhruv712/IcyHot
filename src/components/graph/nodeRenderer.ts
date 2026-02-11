@@ -5,7 +5,8 @@ export function drawNodes(
   nodes: GraphNode[],
   hoveredNodeId: string | null,
   selectedNodeId: string | null,
-  dpr: number
+  dpr: number,
+  time: number
 ) {
   // Sort by importance so important nodes render on top
   const sorted = [...nodes].sort((a, b) => {
@@ -14,13 +15,17 @@ export function drawNodes(
     return a.importance - b.importance;
   });
 
-  for (const node of sorted) {
+  for (let idx = 0; idx < sorted.length; idx++) {
+    const node = sorted[idx];
     const x = node.x ?? 0;
     const y = node.y ?? 0;
 
-    // Glow effect for warm nodes
+    // Glow effect for warm nodes (with breathing animation)
     if (node.temperature > 0.2 && node.id !== "me") {
-      const glowRadius = node.nodeRadius * (1.5 + node.temperature * 1.5);
+      const breathe =
+        Math.sin(time * 0.0015 + idx * 0.7) * 0.15 + 0.85;
+      const glowRadius =
+        node.nodeRadius * (1.5 + node.temperature * 1.5) * breathe;
       const gradient = ctx.createRadialGradient(
         x,
         y,
@@ -40,20 +45,25 @@ export function drawNodes(
 
     // "Me" node special rendering
     if (node.id === "me") {
-      // Subtle pulse glow
+      // Pulsing glow
+      const pulse = Math.sin(time * 0.002) * 0.15 + 0.85;
+      const glowRadius = node.nodeRadius * 2.5 * pulse;
       const gradient = ctx.createRadialGradient(
         x,
         y,
         node.nodeRadius * 0.3,
         x,
         y,
-        node.nodeRadius * 2
+        glowRadius
       );
-      gradient.addColorStop(0, "rgba(255, 255, 255, 0.15)");
+      gradient.addColorStop(
+        0,
+        `rgba(255, 255, 255, ${(0.2 * pulse).toFixed(2)})`
+      );
       gradient.addColorStop(1, "transparent");
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(x, y, node.nodeRadius * 2, 0, Math.PI * 2);
+      ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
       ctx.fill();
 
       // Core circle
@@ -72,12 +82,12 @@ export function drawNodes(
       ctx.arc(x, y, node.nodeRadius, 0, Math.PI * 2);
       ctx.fill();
 
-      // Label
+      // Label — font size in canvas units, appears as 16 CSS pixels
       ctx.fillStyle = "#ffffff";
-      ctx.font = `bold ${14 / dpr}px Inter, system-ui, sans-serif`;
+      ctx.font = `bold ${Math.round(16 * dpr)}px Inter, system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      ctx.fillText("Me", x, y + node.nodeRadius + 8);
+      ctx.fillText("Me", x, y + node.nodeRadius + 8 * dpr);
       continue;
     }
 
@@ -100,34 +110,42 @@ export function drawNodes(
     // Selection/hover ring
     if (node.id === selectedNodeId) {
       ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.5 * dpr;
       ctx.beginPath();
-      ctx.arc(x, y, node.nodeRadius + 4, 0, Math.PI * 2);
+      ctx.arc(x, y, node.nodeRadius + 4 * dpr, 0, Math.PI * 2);
       ctx.stroke();
     } else if (node.id === hoveredNodeId) {
       ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath();
-      ctx.arc(x, y, node.nodeRadius + 3, 0, Math.PI * 2);
+      ctx.arc(x, y, node.nodeRadius + 3 * dpr, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Name label
+    // Name label — font size in canvas units, appears as fontSize CSS pixels
     ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
     const fontSize = Math.max(10, 9 + node.importance * 0.4);
-    ctx.font = `${fontSize / dpr}px Inter, system-ui, sans-serif`;
+    ctx.font = `${Math.round(fontSize * dpr)}px Inter, system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillText(node.name, x, y + node.nodeRadius + 6);
+    ctx.fillText(node.name, x, y + node.nodeRadius + 6 * dpr);
   }
 }
 
 function lighten(color: string, amount: number): string {
-  // Parse rgb(r,g,b) and lighten
   const match = color.match(/rgb\((\d+),(\d+),(\d+)\)/);
   if (!match) return color;
-  const r = Math.min(255, Math.round(parseInt(match[1]) + (255 - parseInt(match[1])) * amount));
-  const g = Math.min(255, Math.round(parseInt(match[2]) + (255 - parseInt(match[2])) * amount));
-  const b = Math.min(255, Math.round(parseInt(match[3]) + (255 - parseInt(match[3])) * amount));
+  const r = Math.min(
+    255,
+    Math.round(parseInt(match[1]) + (255 - parseInt(match[1])) * amount)
+  );
+  const g = Math.min(
+    255,
+    Math.round(parseInt(match[2]) + (255 - parseInt(match[2])) * amount)
+  );
+  const b = Math.min(
+    255,
+    Math.round(parseInt(match[3]) + (255 - parseInt(match[3])) * amount)
+  );
   return `rgb(${r},${g},${b})`;
 }

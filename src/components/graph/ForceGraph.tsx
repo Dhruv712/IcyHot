@@ -37,11 +37,11 @@ export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
     return () => observer.disconnect();
   }, []);
 
-  // Force simulation
+  // Force simulation — RAF drives rendering, not simulation ticks
   const { nodesRef, simulationRef, updateNodes } = useForceSimulation({
     width: dimensions.width * dpr,
     height: dimensions.height * dpr,
-    onTick: () => drawFrame(),
+    dpr,
   });
 
   // Interaction
@@ -69,6 +69,20 @@ export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
     height: dimensions.height,
     dpr,
   });
+
+  // Continuous RAF rendering loop — drives all animation (starfield, glows, physics)
+  const drawFrameRef = useRef(drawFrame);
+  drawFrameRef.current = drawFrame;
+
+  useEffect(() => {
+    let animationId: number;
+    const loop = () => {
+      drawFrameRef.current();
+      animationId = requestAnimationFrame(loop);
+    };
+    animationId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animationId);
+  }, []);
 
   // Update nodes when data changes
   useEffect(() => {

@@ -112,9 +112,10 @@ export function useGraphInteraction({
         draggedNode.fx = event.x * dpr;
         draggedNode.fy = event.y * dpr;
       })
-      .on("end", (event) => {
+      .on("end", () => {
         if (!draggedNode) return;
-        sim.alphaTarget(0.02);
+        // Burst of energy on release for satisfying snap-back
+        sim.alphaTarget(0.02).alpha(0.5).restart();
         draggedNode.fx = null;
         draggedNode.fy = null;
         draggedNode = null;

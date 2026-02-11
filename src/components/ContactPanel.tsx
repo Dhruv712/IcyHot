@@ -101,10 +101,16 @@ export default function ContactPanel({ node, onClose }: ContactPanelProps) {
         </h3>
         <textarea
           value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="What did you talk about? (optional)"
-          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500 resize-none"
-          rows={2}
+          onChange={(e) => {
+            setNote(e.target.value);
+            // Auto-expand textarea to fit content
+            const el = e.target;
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 200) + "px";
+          }}
+          placeholder="What did you talk about? Topics, key takeaways, follow-ups..."
+          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500 resize-y min-h-[60px] max-h-[200px]"
+          rows={3}
         />
         <button
           onClick={handleLogInteraction}
