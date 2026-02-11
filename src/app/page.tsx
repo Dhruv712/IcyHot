@@ -1,65 +1,100 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useCallback } from "react";
+import { useSession, signIn } from "next-auth/react";
+import ForceGraph from "@/components/graph/ForceGraph";
+import ContactPanel from "@/components/ContactPanel";
+import AddContactDialog from "@/components/AddContactDialog";
+import NudgeList from "@/components/NudgeList";
+import QuickLogButton from "@/components/QuickLogButton";
+import { useGraphData } from "@/hooks/useGraphData";
+import type { GraphNode } from "@/components/graph/types";
 
 export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+  const { data: session, status } = useSession();
+  const { data: graphData, isLoading } = useGraphData();
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+
+  const handleNodeClick = useCallback((node: GraphNode | null) => {
+    setSelectedNode(node);
+  }, []);
+
+  if (status === "loading") {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-950">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-950">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold mb-2">
+            <span className="text-blue-400">Icy</span>
+            <span className="text-red-400">Hot</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-gray-400 mb-6">
+            See your relationships. Feel the temperature.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={() => signIn("google")}
+            className="bg-white text-gray-900 font-medium px-6 py-2.5 rounded-lg hover:bg-gray-100 transition-colors"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Sign in with Google
+          </button>
         </div>
-      </main>
+      </div>
+    );
+  }
+
+  const contactNodes = graphData?.nodes ?? [];
+
+  return (
+    <div className="h-screen w-screen overflow-hidden relative">
+      {/* Header */}
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3">
+        <h1 className="text-lg font-bold">
+          <span className="text-blue-400">Icy</span>
+          <span className="text-red-400">Hot</span>
+        </h1>
+        <button
+          onClick={() => setShowAddDialog(true)}
+          className="bg-gray-800 hover:bg-gray-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors"
+        >
+          + Add Person
+        </button>
+      </div>
+
+      {/* Graph */}
+      {isLoading ? (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-gray-500">Loading your network...</div>
+        </div>
+      ) : (
+        <ForceGraph data={graphData ?? null} onNodeClick={handleNodeClick} />
+      )}
+
+      {/* Contact Panel (sidebar) */}
+      {selectedNode && (
+        <ContactPanel
+          node={selectedNode}
+          onClose={() => setSelectedNode(null)}
+        />
+      )}
+
+      {/* Add Contact Dialog */}
+      {showAddDialog && (
+        <AddContactDialog onClose={() => setShowAddDialog(false)} />
+      )}
+
+      {/* Nudge List */}
+      <NudgeList nodes={contactNodes} onNodeSelect={setSelectedNode} />
+
+      {/* Quick Log Button */}
+      <QuickLogButton nodes={contactNodes} />
     </div>
   );
 }
