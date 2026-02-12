@@ -70,7 +70,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
   const groupsWithMembers = groups
     .map((g) => ({
       ...g,
-      members: contactNodes.filter((n) => n.groupId === g.id),
+      members: contactNodes.filter((n) => n.groupIds.includes(g.id)),
     }))
     .filter((g) => g.members.length >= 2);
 
@@ -88,7 +88,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
 
   const selectGroup = (groupId: string) => {
     const memberIds = contactNodes
-      .filter((n) => n.groupId === groupId)
+      .filter((n) => n.groupIds.includes(groupId))
       .map((n) => n.id);
     setSelectedIds((prev) => {
       const next = new Set(prev);

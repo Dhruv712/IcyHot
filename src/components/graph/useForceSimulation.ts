@@ -57,7 +57,7 @@ export function useForceSimulation({
       nodeRadius: 32,
       color: "#f5f5f5",
       mass: 10,
-      groupId: null,
+      groupIds: [],
       groupAngle: null,
       lastInteraction: null,
       nudgeScore: 0,

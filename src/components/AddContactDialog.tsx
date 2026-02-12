@@ -14,7 +14,7 @@ export default function AddContactDialog({ onClose }: AddContactDialogProps) {
   const [relationshipType, setRelationshipType] = useState("friend");
   const [importance, setImportance] = useState(5);
   const [notes, setNotes] = useState("");
-  const [groupId, setGroupId] = useState("");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [newGroupName, setNewGroupName] = useState("");
   const [showNewGroup, setShowNewGroup] = useState(false);
   const createContact = useCreateContact();
@@ -25,13 +25,13 @@ export default function AddContactDialog({ onClose }: AddContactDialogProps) {
     e.preventDefault();
     if (!name.trim()) return;
 
-    let finalGroupId = groupId || undefined;
+    let finalGroupIds = [...selectedGroupIds];
 
     // If creating a new group inline, do it first
     if (showNewGroup && newGroupName.trim()) {
       try {
         const newGroup = await createGroup.mutateAsync({ name: newGroupName.trim() });
-        finalGroupId = newGroup.id;
+        finalGroupIds.push(newGroup.id);
       } catch {
         return; // Don't create contact if group creation fails
       }
@@ -43,7 +43,7 @@ export default function AddContactDialog({ onClose }: AddContactDialogProps) {
         relationshipType,
         importance,
         notes: notes.trim() || undefined,
-        groupId: finalGroupId,
+        groupIds: finalGroupIds.length > 0 ? finalGroupIds : undefined,
       },
       { onSuccess: onClose }
     );
@@ -89,54 +89,74 @@ export default function AddContactDialog({ onClose }: AddContactDialogProps) {
             </select>
           </div>
 
-          {/* Group */}
+          {/* Groups */}
           <div>
             <label className="block text-sm text-gray-400 mb-1">
-              Group (optional)
+              Groups (optional)
             </label>
-            {!showNewGroup ? (
-              <select
-                value={groupId}
-                onChange={(e) => {
-                  if (e.target.value === "__new__") {
-                    setShowNewGroup(true);
-                    setGroupId("");
-                  } else {
-                    setGroupId(e.target.value);
-                  }
-                }}
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gray-500"
-              >
-                <option value="">No group</option>
-                {groups?.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-                <option value="__new__">＋ New group...</option>
-              </select>
-            ) : (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
-                  placeholder="Group name"
-                  className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
-                  autoFocus
-                />
+            <div className="space-y-1">
+              {groups?.map((g) => {
+                const isSelected = selectedGroupIds.includes(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedGroupIds((prev) =>
+                        isSelected
+                          ? prev.filter((id) => id !== g.id)
+                          : [...prev, g.id]
+                      );
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-900 transition-colors text-left"
+                  >
+                    <span className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+                      isSelected ? "bg-blue-600 border-blue-500" : "border-gray-600"
+                    }`}>
+                      {isSelected && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </span>
+                    {g.color && (
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                    )}
+                    <span className="text-gray-300">{g.name}</span>
+                  </button>
+                );
+              })}
+              {!showNewGroup ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowNewGroup(false);
-                    setNewGroupName("");
-                  }}
-                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2"
+                  onClick={() => setShowNewGroup(true)}
+                  className="text-xs text-gray-400 hover:text-gray-300 transition-colors px-3 py-1"
                 >
-                  Cancel
+                  ＋ New group...
                 </button>
-              </div>
-            )}
+              ) : (
+                <div className="flex gap-2 px-3">
+                  <input
+                    type="text"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    placeholder="Group name"
+                    className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewGroup(false);
+                      setNewGroupName("");
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Importance */}

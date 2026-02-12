@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { contacts, interactions, groups } from "@/db/schema";
+import { contacts, interactions, groups, contactGroups } from "@/db/schema";
 import { auth } from "@/auth";
 import { eq, and, gte } from "drizzle-orm";
 import { computeTemperature, temperatureToColor } from "@/lib/temperature";
@@ -38,6 +38,18 @@ export async function GET() {
     .select()
     .from(groups)
     .where(eq(groups.userId, userId));
+
+  // Fetch all group memberships
+  const allMemberships = await db
+    .select()
+    .from(contactGroups);
+  // Build contactId -> groupId[] map
+  const groupsByContact = new Map<string, string[]>();
+  for (const m of allMemberships) {
+    const existing = groupsByContact.get(m.contactId) || [];
+    existing.push(m.groupId);
+    groupsByContact.set(m.contactId, existing);
+  }
 
   // Group interactions by contactId
   const interactionsByContact = new Map<
@@ -89,10 +101,15 @@ export async function GET() {
       mass,
       orbitalRadius,
       nodeRadius,
-      groupId: contact.groupId,
-      groupAngle: contact.groupId
-        ? groupAngles.get(contact.groupId) ?? null
-        : null,
+      groupIds: groupsByContact.get(contact.id) ?? [],
+      groupAngle: (() => {
+        const gIds = groupsByContact.get(contact.id);
+        if (!gIds || gIds.length === 0) return null;
+        // Average angle of all groups this contact belongs to
+        const angles = gIds.map((gId) => groupAngles.get(gId)).filter((a): a is number => a !== undefined);
+        if (angles.length === 0) return null;
+        return angles.reduce((sum, a) => sum + a, 0) / angles.length;
+      })(),
       lastInteraction: lastInteraction?.toISOString() ?? null,
       nudgeScore: nudgeScore(temperature, contact.importance),
       interactionCount: contactInteractions.length,

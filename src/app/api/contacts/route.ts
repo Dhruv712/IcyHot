@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { contacts } from "@/db/schema";
+import { contacts, contactGroups } from "@/db/schema";
 import { auth } from "@/auth";
 import { eq } from "drizzle-orm";
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { name, relationshipType, importance, notes, groupId } = body;
+  const { name, relationshipType, importance, notes, groupIds } = body;
 
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -39,9 +39,15 @@ export async function POST(req: NextRequest) {
       relationshipType: relationshipType || "friend",
       importance: importance ?? 5,
       notes: notes || null,
-      groupId: groupId || null,
     })
     .returning();
+
+  // Insert group memberships
+  if (Array.isArray(groupIds) && groupIds.length > 0) {
+    await db.insert(contactGroups).values(
+      groupIds.map((gId: string) => ({ contactId: contact.id, groupId: gId }))
+    );
+  }
 
   return NextResponse.json(contact, { status: 201 });
 }

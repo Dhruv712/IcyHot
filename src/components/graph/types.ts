@@ -9,7 +9,7 @@ export interface GraphNode extends SimulationNodeDatum {
   nodeRadius: number;
   color: string;
   mass: number;
-  groupId: string | null;
+  groupIds: string[];
   groupAngle: number | null;
   lastInteraction: string | null;
   nudgeScore: number;

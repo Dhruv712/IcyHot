@@ -182,10 +182,12 @@ export function useCanvasRenderer({
     if (isFocused) ctx.globalAlpha = 0.15;
     const groupMap = new Map<string, GraphNode[]>();
     for (const node of nodes) {
-      if (node.groupId && node.id !== "me") {
-        const group = groupMap.get(node.groupId) || [];
-        group.push(node);
-        groupMap.set(node.groupId, group);
+      if (node.groupIds.length > 0 && node.id !== "me") {
+        for (const gId of node.groupIds) {
+          const group = groupMap.get(gId) || [];
+          group.push(node);
+          groupMap.set(gId, group);
+        }
       }
     }
     for (const [, groupNodes] of groupMap) {

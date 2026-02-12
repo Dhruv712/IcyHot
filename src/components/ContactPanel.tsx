@@ -84,55 +84,60 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
           </button>
         </div>
 
-        {/* Group badge/selector */}
+        {/* Group badges/selector */}
         <div className="mt-2 relative">
-          {(() => {
-            const currentGroup = groups?.find((g) => g.id === node.groupId);
-            return (
-              <button
-                onClick={() => setShowGroupMenu(!showGroupMenu)}
-                className="text-xs px-2 py-0.5 rounded-full transition-colors border border-gray-700 hover:border-gray-500"
-                style={currentGroup?.color ? {
-                  borderColor: currentGroup.color + "66",
-                  color: currentGroup.color,
-                  backgroundColor: currentGroup.color + "15",
-                } : undefined}
+          <div className="flex flex-wrap gap-1 items-center">
+            {node.groupIds.length > 0 && groups?.filter((g) => node.groupIds.includes(g.id)).map((g) => (
+              <span
+                key={g.id}
+                className="text-xs px-2 py-0.5 rounded-full border"
+                style={g.color ? {
+                  borderColor: g.color + "66",
+                  color: g.color,
+                  backgroundColor: g.color + "15",
+                } : { borderColor: "#374151", color: "#9ca3af" }}
               >
-                {currentGroup ? currentGroup.name : "+ Add to group"}
-              </button>
-            );
-          })()}
+                {g.name}
+              </span>
+            ))}
+            <button
+              onClick={() => setShowGroupMenu(!showGroupMenu)}
+              className="text-xs px-2 py-0.5 rounded-full transition-colors border border-gray-700 hover:border-gray-500 text-gray-400"
+            >
+              {node.groupIds.length > 0 ? "Edit" : "+ Add to group"}
+            </button>
+          </div>
           {showGroupMenu && (
             <div className="absolute top-7 left-0 z-10 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px]">
-              {node.groupId && (
-                <button
-                  onClick={() => {
-                    updateContact.mutate({ id: node.id, groupId: null });
-                    setShowGroupMenu(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 transition-colors"
-                >
-                  Remove from group
-                </button>
-              )}
-              {groups?.map((g) => (
-                <button
-                  key={g.id}
-                  onClick={() => {
-                    updateContact.mutate({ id: node.id, groupId: g.id });
-                    setShowGroupMenu(false);
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-800 transition-colors flex items-center gap-2 ${
-                    g.id === node.groupId ? "text-white font-medium" : "text-gray-300"
-                  }`}
-                >
-                  {g.color && (
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
-                  )}
-                  {g.name}
-                  {g.id === node.groupId && <span className="text-gray-500 ml-auto">current</span>}
-                </button>
-              ))}
+              {groups?.map((g) => {
+                const isMember = node.groupIds.includes(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => {
+                      const newGroupIds = isMember
+                        ? node.groupIds.filter((id) => id !== g.id)
+                        : [...node.groupIds, g.id];
+                      updateContact.mutate({ id: node.id, groupIds: newGroupIds });
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-800 transition-colors flex items-center gap-2 text-gray-300"
+                  >
+                    <span className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+                      isMember ? "bg-blue-600 border-blue-500" : "border-gray-600"
+                    }`}>
+                      {isMember && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </span>
+                    {g.color && (
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                    )}
+                    {g.name}
+                  </button>
+                );
+              })}
               <div className="border-t border-gray-700 mt-1 pt-1">
                 {!creatingGroup ? (
                   <button
@@ -156,7 +161,7 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
                             { name: newGroupName.trim() },
                             {
                               onSuccess: (newGroup) => {
-                                updateContact.mutate({ id: node.id, groupId: newGroup.id });
+                                updateContact.mutate({ id: node.id, groupIds: [...node.groupIds, newGroup.id] });
                                 setNewGroupName("");
                                 setCreatingGroup(false);
                                 setShowGroupMenu(false);
@@ -177,7 +182,7 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
                             { name: newGroupName.trim() },
                             {
                               onSuccess: (newGroup) => {
-                                updateContact.mutate({ id: node.id, groupId: newGroup.id });
+                                updateContact.mutate({ id: node.id, groupIds: [...node.groupIds, newGroup.id] });
                                 setNewGroupName("");
                                 setCreatingGroup(false);
                                 setShowGroupMenu(false);

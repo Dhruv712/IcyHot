@@ -46,12 +46,20 @@ export const contacts = pgTable("contacts", {
     .notNull(),
   importance: integer("importance").default(5).notNull(),
   notes: text("notes"),
-  groupId: uuid("group_id").references(() => groups.id, {
-    onDelete: "set null",
-  }),
+  // Groups managed via contactGroups join table
   decayRateOverride: real("decay_rate_override"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const contactGroups = pgTable("contact_groups", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  contactId: uuid("contact_id")
+    .references(() => contacts.id, { onDelete: "cascade" })
+    .notNull(),
+  groupId: uuid("group_id")
+    .references(() => groups.id, { onDelete: "cascade" })
+    .notNull(),
 });
 
 export const sentimentEnum = pgEnum("sentiment", [
