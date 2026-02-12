@@ -6,11 +6,17 @@ import { select } from "d3-selection";
 import type { Simulation } from "d3-force";
 import type { GraphNode } from "./types";
 
+interface ViewportTransform {
+  x: number;
+  y: number;
+  scale: number;
+}
+
 interface UseGraphInteractionOptions {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   nodesRef: React.RefObject<GraphNode[]>;
   simulationRef: React.RefObject<Simulation<GraphNode, undefined> | null>;
-  dpr: number;
+  viewportRef: React.RefObject<ViewportTransform>;
   onNodeClick: (node: GraphNode | null) => void;
 }
 
@@ -18,7 +24,7 @@ export function useGraphInteraction({
   canvasRef,
   nodesRef,
   simulationRef,
-  dpr,
+  viewportRef,
   onNodeClick,
 }: UseGraphInteractionOptions) {
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -29,14 +35,25 @@ export function useGraphInteraction({
     node: GraphNode;
   } | null>(null);
 
+  // Convert screen (CSS pixel) coordinates to world coordinates
+  // accounting for the focus mode viewport transform
+  const screenToWorld = useCallback(
+    (sx: number, sy: number): [number, number] => {
+      const vp = viewportRef.current;
+      return [(sx - vp.x) / vp.scale, (sy - vp.y) / vp.scale];
+    },
+    [viewportRef]
+  );
+
   const getNodeAtPoint = useCallback(
     (mx: number, my: number): GraphNode | null => {
+      const [wx, wy] = screenToWorld(mx, my);
       const nodes = nodesRef.current;
       // Iterate in reverse for z-order (top nodes first)
       for (let i = nodes.length - 1; i >= 0; i--) {
         const node = nodes[i];
-        const dx = mx - (node.x ?? 0);
-        const dy = my - (node.y ?? 0);
+        const dx = wx - (node.x ?? 0);
+        const dy = wy - (node.y ?? 0);
         const hitRadius = node.nodeRadius + 4;
         if (dx * dx + dy * dy < hitRadius * hitRadius) {
           return node;
@@ -44,7 +61,7 @@ export function useGraphInteraction({
       }
       return null;
     },
-    [nodesRef]
+    [nodesRef, screenToWorld]
   );
 
   // Handle hover + tooltip
@@ -54,8 +71,8 @@ export function useGraphInteraction({
 
     const handleMouseMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) * dpr;
-      const my = (e.clientY - rect.top) * dpr;
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
       const node = getNodeAtPoint(mx, my);
 
       setHoveredNodeId(node?.id ?? null);
@@ -80,20 +97,19 @@ export function useGraphInteraction({
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseleave", handleMouseLeave);
     };
-  }, [canvasRef, dpr, getNodeAtPoint]);
+  }, [canvasRef, getNodeAtPoint]);
 
-  // Handle drag
+  // Handle drag — read simulationRef.current inside callbacks (not at setup)
   useEffect(() => {
     const canvas = canvasRef.current;
-    const sim = simulationRef.current;
-    if (!canvas || !sim) return;
+    if (!canvas) return;
 
     let draggedNode: GraphNode | null = null;
 
     const d3Drag = drag<HTMLCanvasElement, unknown>()
       .subject((event) => {
-        const mx = event.x * dpr;
-        const my = event.y * dpr;
+        const mx = event.x;
+        const my = event.y;
         const node = getNodeAtPoint(mx, my);
         if (node && node.id !== "me") {
           return node;
@@ -103,19 +119,22 @@ export function useGraphInteraction({
       .on("start", (event) => {
         if (!event.subject) return;
         draggedNode = event.subject as GraphNode;
-        sim.alphaTarget(0.1).restart();
+        const sim = simulationRef.current;
+        if (sim) sim.alphaTarget(0.1).restart();
         draggedNode.fx = draggedNode.x;
         draggedNode.fy = draggedNode.y;
       })
       .on("drag", (event) => {
         if (!draggedNode) return;
-        draggedNode.fx = event.x * dpr;
-        draggedNode.fy = event.y * dpr;
+        // Transform screen coords to world coords for focus mode
+        const vp = viewportRef.current;
+        draggedNode.fx = (event.x - vp.x) / vp.scale;
+        draggedNode.fy = (event.y - vp.y) / vp.scale;
       })
       .on("end", () => {
         if (!draggedNode) return;
-        // Burst of energy on release for satisfying snap-back
-        sim.alphaTarget(0.02).alpha(0.5).restart();
+        const sim = simulationRef.current;
+        if (sim) sim.alphaTarget(0.02).alpha(0.5).restart();
         draggedNode.fx = null;
         draggedNode.fy = null;
         draggedNode = null;
@@ -126,7 +145,7 @@ export function useGraphInteraction({
     return () => {
       select(canvas).on(".drag", null);
     };
-  }, [canvasRef, simulationRef, dpr, getNodeAtPoint]);
+  }, [canvasRef, simulationRef, viewportRef, getNodeAtPoint]);
 
   // Handle click
   useEffect(() => {
@@ -135,8 +154,8 @@ export function useGraphInteraction({
 
     const handleClick = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) * dpr;
-      const my = (e.clientY - rect.top) * dpr;
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
       const node = getNodeAtPoint(mx, my);
 
       if (node && node.id !== "me") {
@@ -150,7 +169,19 @@ export function useGraphInteraction({
 
     canvas.addEventListener("click", handleClick);
     return () => canvas.removeEventListener("click", handleClick);
-  }, [canvasRef, dpr, getNodeAtPoint, onNodeClick]);
+  }, [canvasRef, getNodeAtPoint, onNodeClick]);
+
+  // Handle Escape key to unfocus
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedNodeId(null);
+        onNodeClick(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onNodeClick]);
 
   return { hoveredNodeId, selectedNodeId, setSelectedNodeId, tooltip };
 }

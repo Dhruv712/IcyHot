@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 interface LogInteractionInput {
   contactId: string;
   note?: string;
+  sentiment?: "great" | "good" | "neutral" | "awkward";
   occurredAt?: string;
 }
 

@@ -99,8 +99,27 @@ export async function GET() {
     };
   });
 
+  // Compute network health score (0-100)
+  let healthScore = 0;
+  if (nodes.length > 0) {
+    const totalImportance = nodes.reduce((sum, n) => sum + n.importance, 0);
+    const weightedTemp = nodes.reduce(
+      (sum, n) => sum + n.importance * n.temperature,
+      0
+    );
+    healthScore = totalImportance > 0
+      ? Math.round((weightedTemp / totalImportance) * 100)
+      : 0;
+    // Penalize for neglected important contacts (temp < 0.1, importance >= 7)
+    const neglected = nodes.filter(
+      (n) => n.temperature < 0.1 && n.importance >= 7
+    ).length;
+    healthScore = Math.max(0, healthScore - neglected * 5);
+  }
+
   return NextResponse.json({
     nodes,
     groups: allGroups,
+    healthScore,
   });
 }

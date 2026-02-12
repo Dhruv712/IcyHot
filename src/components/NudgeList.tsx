@@ -8,9 +8,10 @@ import { useLogInteraction } from "@/hooks/useInteractions";
 interface NudgeListProps {
   nodes: GraphNode[];
   onNodeSelect: (node: GraphNode) => void;
+  onInteractionLogged?: (nodeId: string) => void;
 }
 
-export default function NudgeList({ nodes, onNodeSelect }: NudgeListProps) {
+export default function NudgeList({ nodes, onNodeSelect, onInteractionLogged }: NudgeListProps) {
   const logInteraction = useLogInteraction();
 
   // Sort by nudge score (importance * coldness), take top 8
@@ -52,7 +53,9 @@ export default function NudgeList({ nodes, onNodeSelect }: NudgeListProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                logInteraction.mutate({ contactId: node.id });
+                logInteraction.mutate({ contactId: node.id }, {
+                  onSuccess: () => onInteractionLogged?.(node.id),
+                });
               }}
               className="opacity-0 group-hover:opacity-100 text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded transition-all"
             >

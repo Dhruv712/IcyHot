@@ -4,9 +4,10 @@ export function computeNodeProperties(
 ) {
   const mass = importance;
 
-  // Important + warm = close orbit, unimportant + cold = far orbit
-  const baseRadius = 100 + (10 - importance) * 40; // 100..460
-  const coldnessFactor = 1 + (1 - temperature) * 1.5; // 1.0..2.5
+  // Temperature is the PRIMARY driver of orbit distance (cold = far)
+  // Importance is a subtle secondary factor (important = slightly closer)
+  const baseRadius = 80 + (10 - importance) * 15; // 80..215
+  const coldnessFactor = 1 + (1 - temperature) * 2.5; // 1.0..3.5
   const orbitalRadius = baseRadius * coldnessFactor;
 
   // Node size proportional to importance

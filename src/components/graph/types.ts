@@ -26,4 +26,5 @@ export interface GraphGroup {
 export interface GraphData {
   nodes: GraphNode[];
   groups: GraphGroup[];
+  healthScore: number;
 }

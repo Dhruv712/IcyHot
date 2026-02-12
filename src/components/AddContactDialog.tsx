@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useCreateContact } from "@/hooks/useContacts";
+import { useGroups, useCreateGroup } from "@/hooks/useGroups";
 import { RELATIONSHIP_LABELS } from "@/lib/constants";
 
 interface AddContactDialogProps {
@@ -13,11 +14,28 @@ export default function AddContactDialog({ onClose }: AddContactDialogProps) {
   const [relationshipType, setRelationshipType] = useState("friend");
   const [importance, setImportance] = useState(5);
   const [notes, setNotes] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [showNewGroup, setShowNewGroup] = useState(false);
   const createContact = useCreateContact();
+  const { data: groups } = useGroups();
+  const createGroup = useCreateGroup();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    let finalGroupId = groupId || undefined;
+
+    // If creating a new group inline, do it first
+    if (showNewGroup && newGroupName.trim()) {
+      try {
+        const newGroup = await createGroup.mutateAsync({ name: newGroupName.trim() });
+        finalGroupId = newGroup.id;
+      } catch {
+        return; // Don't create contact if group creation fails
+      }
+    }
 
     createContact.mutate(
       {
@@ -25,6 +43,7 @@ export default function AddContactDialog({ onClose }: AddContactDialogProps) {
         relationshipType,
         importance,
         notes: notes.trim() || undefined,
+        groupId: finalGroupId,
       },
       { onSuccess: onClose }
     );
@@ -68,6 +87,56 @@ export default function AddContactDialog({ onClose }: AddContactDialogProps) {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Group */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">
+              Group (optional)
+            </label>
+            {!showNewGroup ? (
+              <select
+                value={groupId}
+                onChange={(e) => {
+                  if (e.target.value === "__new__") {
+                    setShowNewGroup(true);
+                    setGroupId("");
+                  } else {
+                    setGroupId(e.target.value);
+                  }
+                }}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gray-500"
+              >
+                <option value="">No group</option>
+                {groups?.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+                <option value="__new__">＋ New group...</option>
+              </select>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="Group name"
+                  className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewGroup(false);
+                    setNewGroupName("");
+                  }}
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Importance */}

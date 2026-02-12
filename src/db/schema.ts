@@ -54,6 +54,13 @@ export const contacts = pgTable("contacts", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const sentimentEnum = pgEnum("sentiment", [
+  "great",
+  "good",
+  "neutral",
+  "awkward",
+]);
+
 export const interactions = pgTable("interactions", {
   id: uuid("id").defaultRandom().primaryKey(),
   contactId: uuid("contact_id")
@@ -63,6 +70,7 @@ export const interactions = pgTable("interactions", {
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   note: text("note"),
+  sentiment: sentimentEnum("sentiment"),
   occurredAt: timestamp("occurred_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

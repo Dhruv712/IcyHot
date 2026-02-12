@@ -13,13 +13,11 @@ import type { GraphNode } from "./types";
 interface UseForceSimulationOptions {
   width: number;
   height: number;
-  dpr: number;
 }
 
 export function useForceSimulation({
   width,
   height,
-  dpr,
 }: UseForceSimulationOptions) {
   const simulationRef = useRef<Simulation<GraphNode, undefined> | null>(null);
   const nodesRef = useRef<GraphNode[]>([]);
@@ -28,14 +26,10 @@ export function useForceSimulation({
   const centerRef = useRef({ x: width / 2, y: height / 2 });
   centerRef.current = { x: width / 2, y: height / 2 };
 
-  const dprRef = useRef(dpr);
-  dprRef.current = dpr;
-
   // Stable updateNodes — never recreated, reads center from ref
   const updateNodes = useCallback((newNodes: GraphNode[]) => {
     const cx = centerRef.current.x;
     const cy = centerRef.current.y;
-    const currentDpr = dprRef.current;
 
     // Preserve positions of existing nodes
     const existingPositions = new Map<
@@ -53,21 +47,14 @@ export function useForceSimulation({
       }
     }
 
-    // Scale node radii by DPR so they appear correct on HiDPI
-    const scaledNodes = newNodes.map((node) => ({
-      ...node,
-      nodeRadius: node.nodeRadius * currentDpr,
-      orbitalRadius: node.orbitalRadius * currentDpr,
-    }));
-
-    // Create "Me" center node
+    // Create "Me" center node — all values in CSS pixels, no DPR scaling
     const meNode: GraphNode = {
       id: "me",
       name: "Me",
       temperature: 1,
       importance: 10,
       orbitalRadius: 0,
-      nodeRadius: 32 * currentDpr,
+      nodeRadius: 32,
       color: "#f5f5f5",
       mass: 10,
       groupId: null,
@@ -82,7 +69,8 @@ export function useForceSimulation({
       fy: cy,
     };
 
-    const mergedNodes = [meNode, ...scaledNodes].map((node) => {
+    // No DPR scaling — simulation runs in CSS pixel space
+    const mergedNodes = [meNode, ...newNodes].map((node) => {
       const existing = existingPositions.get(node.id);
       if (existing && node.id !== "me") {
         return {
@@ -141,7 +129,8 @@ export function useForceSimulation({
       .force("groupCluster", groupClusterForce(centerRef, 0.02))
       .alphaDecay(0.005)
       .alphaTarget(0.02)
-      .velocityDecay(0.3);
+      .velocityDecay(0.3)
+      .on("tick", () => {}); // Ensure d3 starts its internal timer
 
     simulationRef.current = sim;
 

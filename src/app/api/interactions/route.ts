@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { contactId, note, occurredAt } = body;
+  const { contactId, note, occurredAt, sentiment } = body;
 
   if (!contactId) {
     return NextResponse.json(
@@ -65,12 +65,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Contact not found" }, { status: 404 });
   }
 
+  const validSentiments = ["great", "good", "neutral", "awkward"];
   const [interaction] = await db
     .insert(interactions)
     .values({
       contactId,
       userId: session.user.id!,
       note: note || null,
+      sentiment: validSentiments.includes(sentiment) ? sentiment : null,
       occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
     })
     .returning();

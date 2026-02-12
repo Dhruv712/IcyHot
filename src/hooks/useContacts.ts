@@ -10,7 +10,8 @@ interface CreateContactInput {
   groupId?: string;
 }
 
-interface UpdateContactInput extends Partial<CreateContactInput> {
+interface UpdateContactInput extends Omit<Partial<CreateContactInput>, "groupId"> {
+  groupId?: string | null;
   decayRateOverride?: number | null;
 }
 

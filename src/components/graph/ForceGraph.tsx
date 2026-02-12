@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import { useForceSimulation } from "./useForceSimulation";
 import { useCanvasRenderer } from "./useCanvasRenderer";
 import { useGraphInteraction } from "./useGraphInteraction";
@@ -13,11 +13,17 @@ interface ForceGraphProps {
   onNodeClick: (node: GraphNode | null) => void;
 }
 
-export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
+export interface ForceGraphHandle {
+  triggerWarmthBurst: (nodeId: string) => void;
+}
+
+const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(function ForceGraph({ data, onNodeClick }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [dpr, setDpr] = useState(1);
+  // Shared viewport transform ref for focus mode (renderer writes, interaction reads)
+  const viewportRef = useRef({ x: 0, y: 0, scale: 1 });
 
   // Measure container
   useEffect(() => {
@@ -37,11 +43,10 @@ export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
     return () => observer.disconnect();
   }, []);
 
-  // Force simulation — RAF drives rendering, not simulation ticks
+  // Force simulation — runs in CSS pixel space
   const { nodesRef, simulationRef, updateNodes } = useForceSimulation({
-    width: dimensions.width * dpr,
-    height: dimensions.height * dpr,
-    dpr,
+    width: dimensions.width,
+    height: dimensions.height,
   });
 
   // Interaction
@@ -50,7 +55,7 @@ export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
       canvasRef,
       nodesRef,
       simulationRef,
-      dpr,
+      viewportRef,
       onNodeClick: useCallback(
         (node: GraphNode | null) => {
           onNodeClick(node);
@@ -60,7 +65,7 @@ export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
     });
 
   // Canvas renderer
-  const { drawFrame } = useCanvasRenderer({
+  const { drawFrame, triggerWarmthBurst } = useCanvasRenderer({
     canvasRef,
     nodesRef,
     hoveredNodeId,
@@ -68,21 +73,28 @@ export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
     width: dimensions.width,
     height: dimensions.height,
     dpr,
+    viewportRef,
   });
 
-  // Continuous RAF rendering loop — drives all animation (starfield, glows, physics)
+  // Expose triggerWarmthBurst to parent via ref
+  useImperativeHandle(ref, () => ({
+    triggerWarmthBurst,
+  }), [triggerWarmthBurst]);
+
+  // Continuous RAF rendering loop — manually tick physics then draw
   const drawFrameRef = useRef(drawFrame);
   drawFrameRef.current = drawFrame;
 
   useEffect(() => {
     let animationId: number;
     const loop = () => {
+      simulationRef.current?.tick();
       drawFrameRef.current();
       animationId = requestAnimationFrame(loop);
     };
     animationId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animationId);
-  }, []);
+  }, [simulationRef]);
 
   // Update nodes when data changes
   useEffect(() => {
@@ -125,4 +137,6 @@ export default function ForceGraph({ data, onNodeClick }: ForceGraphProps) {
       )}
     </div>
   );
-}
+});
+
+export default ForceGraph;

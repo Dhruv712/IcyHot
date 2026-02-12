@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useSession, signIn } from "next-auth/react";
 import ForceGraph from "@/components/graph/ForceGraph";
+import type { ForceGraphHandle } from "@/components/graph/ForceGraph";
 import ContactPanel from "@/components/ContactPanel";
 import AddContactDialog from "@/components/AddContactDialog";
 import NudgeList from "@/components/NudgeList";
 import QuickLogButton from "@/components/QuickLogButton";
+import HealthScore from "@/components/HealthScore";
 import { useGraphData } from "@/hooks/useGraphData";
 import type { GraphNode } from "@/components/graph/types";
 
@@ -15,6 +17,11 @@ export default function Home() {
   const { data: graphData, isLoading } = useGraphData();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const graphRef = useRef<ForceGraphHandle>(null);
+
+  const handleWarmthBurst = useCallback((nodeId: string) => {
+    graphRef.current?.triggerWarmthBurst(nodeId);
+  }, []);
 
   const handleNodeClick = useCallback((node: GraphNode | null) => {
     setSelectedNode(node);
@@ -56,10 +63,18 @@ export default function Home() {
     <div className="h-screen w-screen overflow-hidden relative">
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3">
-        <h1 className="text-lg font-bold">
-          <span className="text-blue-400">Icy</span>
-          <span className="text-red-400">Hot</span>
-        </h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-bold">
+            <span className="text-blue-400">Icy</span>
+            <span className="text-red-400">Hot</span>
+          </h1>
+          {graphData && (
+            <HealthScore
+              score={graphData.healthScore}
+              contactCount={contactNodes.length}
+            />
+          )}
+        </div>
         <button
           onClick={() => setShowAddDialog(true)}
           className="bg-gray-800 hover:bg-gray-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors"
@@ -74,7 +89,7 @@ export default function Home() {
           <div className="text-gray-500">Loading your network...</div>
         </div>
       ) : (
-        <ForceGraph data={graphData ?? null} onNodeClick={handleNodeClick} />
+        <ForceGraph ref={graphRef} data={graphData ?? null} onNodeClick={handleNodeClick} />
       )}
 
       {/* Contact Panel (sidebar) */}
@@ -82,6 +97,7 @@ export default function Home() {
         <ContactPanel
           node={selectedNode}
           onClose={() => setSelectedNode(null)}
+          onInteractionLogged={handleWarmthBurst}
         />
       )}
 
@@ -91,10 +107,10 @@ export default function Home() {
       )}
 
       {/* Nudge List */}
-      <NudgeList nodes={contactNodes} onNodeSelect={setSelectedNode} />
+      <NudgeList nodes={contactNodes} onNodeSelect={setSelectedNode} onInteractionLogged={handleWarmthBurst} />
 
       {/* Quick Log Button */}
-      <QuickLogButton nodes={contactNodes} />
+      <QuickLogButton nodes={contactNodes} groups={graphData?.groups ?? []} onInteractionLogged={handleWarmthBurst} />
     </div>
   );
 }
