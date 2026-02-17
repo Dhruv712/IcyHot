@@ -104,16 +104,30 @@ export async function syncJournalEntries(userId: string): Promise<SyncResult> {
   // 5. Process each new file
   for (const file of newFiles) {
     const entryDate = parseJournalDate(file.name);
-    if (!entryDate) continue;
+    if (!entryDate) {
+      console.log(`[journal-sync] Skipping ${file.name}: could not parse date`);
+      continue;
+    }
 
     const content = await getJournalFileContent(file.path);
-    if (!content.trim()) continue;
+    if (!content.trim()) {
+      console.log(`[journal-sync] Skipping ${file.name}: empty content`);
+      continue;
+    }
+
+    console.log(`[journal-sync] Processing ${file.name} (${content.length} chars, ${allContacts.length} contacts)`);
 
     const extraction = await extractInsights(content, entryDate, allContacts);
     if (!extraction) {
       // Still mark as processed so we don't retry on error
+      console.log(`[journal-sync] ${file.name}: extraction returned null`);
       processedSet.add(file.name);
       continue;
+    }
+
+    console.log(`[journal-sync] ${file.name}: extracted ${extraction.interactions.length} interactions, ${extraction.openLoops.length} open loops, ${extraction.newPeople.length} new people`);
+    for (const ix of extraction.interactions) {
+      console.log(`[journal-sync]   interaction: "${ix.contactName}" (id: ${ix.contactId}) - ${ix.sentiment}`);
     }
 
     // 6. Write extracted data to DB
@@ -240,11 +254,18 @@ Guidelines:
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
 
+    console.log(`[journal-extract] Response: stop_reason=${response.stop_reason}, text length=${text.length}`);
+
     // Extract JSON from response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (!jsonMatch) {
+      console.error(`[journal-extract] No JSON found in response. First 500 chars: ${text.slice(0, 500)}`);
+      return null;
+    }
 
-    return JSON.parse(jsonMatch[0]) as ExtractionResult;
+    const parsed = JSON.parse(jsonMatch[0]) as ExtractionResult;
+    console.log(`[journal-extract] Parsed OK: ${parsed.interactions?.length ?? 0} interactions`);
+    return parsed;
   } catch (error) {
     console.error("Journal extraction error:", error);
     return null;

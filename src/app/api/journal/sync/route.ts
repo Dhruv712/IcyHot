@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { syncJournalEntries } from "@/lib/journal";
 
+export const maxDuration = 60;
+
 export async function POST() {
   const session = await auth();
   if (!session?.user?.id) {
@@ -10,6 +12,7 @@ export async function POST() {
 
   try {
     const result = await syncJournalEntries(session.user.id);
+    console.log("[journal-sync] Result:", JSON.stringify(result));
     return NextResponse.json(result);
   } catch (error) {
     console.error("Journal sync error:", error);
