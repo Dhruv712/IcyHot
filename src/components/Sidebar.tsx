@@ -121,13 +121,23 @@ export default function Sidebar({
               <span className="flex-shrink-0 relative">
                 {item.icon}
                 {item.href === "/" && driftingCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center bg-[var(--amber)] text-[var(--bg-base)] text-[10px] font-bold rounded-full px-1">
+                  <span
+                    className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center bg-[var(--amber)] text-[var(--bg-base)] text-[10px] font-bold rounded-full px-1"
+                    title={`${driftingCount} important contact${driftingCount === 1 ? "" : "s"} going cold`}
+                  >
                     {driftingCount}
                   </span>
                 )}
               </span>
               {!collapsed && (
-                <span className="text-sm font-medium">{item.label}</span>
+                <span className="text-sm font-medium flex items-center gap-2">
+                  {item.label}
+                  {item.href === "/" && driftingCount > 0 && (
+                    <span className="text-[10px] font-normal text-[var(--amber)] opacity-80">
+                      {driftingCount} drifting
+                    </span>
+                  )}
+                </span>
               )}
             </Link>
           );

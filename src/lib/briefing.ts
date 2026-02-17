@@ -151,15 +151,21 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     if (todayEvents.length > 0) {
       contextParts.push("TODAY'S MEETINGS:");
       for (const e of todayEvents) {
-        const contactInteractions = recentInteractions
-          .filter((i) => i.contactId === e.contactId)
-          .slice(0, 3);
+        const allContactInteractions = recentInteractions
+          .filter((i) => i.contactId === e.contactId);
+        const contactInteractions = allContactInteractions.slice(0, 3);
         const contactLoops = activeLoops.filter((l) => l.contactId === e.contactId);
         const contactInsights = recentInsights
           .filter((i) => i.contactId === e.contactId && i.category === "relationship_dynamic")
           .slice(0, 2);
 
+        const totalInteractions = allContactInteractions.length;
+        const firstInteraction = allContactInteractions.length > 0
+          ? allContactInteractions[allContactInteractions.length - 1].occurredAt.toISOString().slice(0, 10)
+          : null;
+
         contextParts.push(`- ${e.contactName} at ${e.eventTime}: "${e.eventSummary}"`);
+        contextParts.push(`  Total interactions on record: ${totalInteractions}${firstInteraction ? ` (first: ${firstInteraction})` : " (NO prior interactions — this may be a first meeting)"}`);
         if (contactInteractions.length > 0) {
           contextParts.push(`  Recent interactions: ${contactInteractions.map((i) => `[${i.sentiment || "neutral"}] ${i.note?.slice(0, 100) || "no notes"}`).join("; ")}`);
         }
@@ -214,19 +220,21 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     const contextStr = contextParts.join("\n");
 
     const stream = client.messages.stream({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-opus-4-20250514",
       max_tokens: 2048,
       messages: [
         {
           role: "user",
           content: `You are Dhruv's personal relationship intelligence system. Generate a daily briefing for ${today}. Write in second person ("you"). Be warm but concise — each piece should be 1-2 sentences max.
 
+CRITICAL: Pay close attention to the "Total interactions on record" for each contact. If a contact has 0 or 1 total interactions, this is likely a new or very recent connection — do NOT write as if Dhruv already has an established relationship with them. Instead, frame the briefing around getting to know them, first impressions, or preparation for an initial meeting. Only reference shared history if multiple prior interactions exist.
+
 ${contextStr}
 
 Return ONLY valid JSON:
 {
   "todayContext": [
-    { "contactId": "...", "contactName": "...", "eventSummary": "...", "eventTime": "...", "briefing": "1-2 sentence prep note for this meeting — what to remember, what to bring up, emotional context" }
+    { "contactId": "...", "contactName": "...", "eventSummary": "...", "eventTime": "...", "briefing": "1-2 sentence prep note for this meeting — what to remember, what to bring up, emotional context. For new contacts (0-1 prior interactions), focus on first impressions and getting to know them." }
   ],
   "relationshipArc": ${arcCandidate ? `{ "contactId": "${arcCandidate.contactId}", "contactName": "${arcCandidate.contactName}", "arc": "2-3 sentence narrative of how this relationship has evolved recently" }` : "null"},
   "temperatureAlerts": [

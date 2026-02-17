@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useDailyBriefing } from "@/hooks/useBriefing";
 import { useJournalOpenLoops, useResolveOpenLoop, useSnoozeOpenLoop } from "@/hooks/useJournal";
+import { useDailySuggestions } from "@/hooks/useSuggestions";
+import { useLogInteraction } from "@/hooks/useInteractions";
 import type { DailyBriefingContent } from "@/lib/briefing";
 
 function formatDate(dateStr: string): string {
@@ -20,12 +22,58 @@ function addDays(days: number): string {
   return d.toISOString().split("T")[0];
 }
 
+function getTodayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+const PINGED_KEY_PREFIX = "icyhot-daily-pinged-";
+
+function loadPingedIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const stored = localStorage.getItem(PINGED_KEY_PREFIX + getTodayStr());
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function savePingedIds(ids: Set<string>) {
+  localStorage.setItem(PINGED_KEY_PREFIX + getTodayStr(), JSON.stringify([...ids]));
+}
+
 export default function BriefingView() {
   const { data, isLoading } = useDailyBriefing();
   const { data: loops } = useJournalOpenLoops();
   const resolveLoop = useResolveOpenLoop();
   const snoozeLoop = useSnoozeOpenLoop();
   const [snoozeOpenId, setSnoozeOpenId] = useState<string | null>(null);
+
+  // Reach-out state
+  const { data: suggestionsData } = useDailySuggestions();
+  const logInteraction = useLogInteraction();
+  const [pingedIds, setPingedIds] = useState<Set<string>>(loadPingedIds);
+  const [expandedReachOutId, setExpandedReachOutId] = useState<string | null>(null);
+  const [reachOutNote, setReachOutNote] = useState("");
+
+  const handlePinged = useCallback(
+    (contactId: string, note?: string) => {
+      logInteraction.mutate(
+        { contactId, note: note || undefined },
+        {
+          onSuccess: () => {
+            const next = new Set(pingedIds);
+            next.add(contactId);
+            setPingedIds(next);
+            savePingedIds(next);
+            setExpandedReachOutId(null);
+            setReachOutNote("");
+          },
+        }
+      );
+    },
+    [logInteraction, pingedIds]
+  );
 
   if (isLoading) {
     return (
@@ -42,6 +90,9 @@ export default function BriefingView() {
   const briefing = data?.briefing;
   const dateStr = data?.date || new Date().toISOString().slice(0, 10);
   const activeLoops = loops?.filter((l) => !l.resolved) ?? [];
+  const suggestions = suggestionsData?.suggestions ?? [];
+  const unpingedSuggestions = suggestions.filter((s) => !pingedIds.has(s.id));
+  const allPinged = suggestions.length > 0 && unpingedSuggestions.length === 0;
 
   return (
     <div className="max-w-[640px] mx-auto p-6 space-y-8">
@@ -197,6 +248,87 @@ export default function BriefingView() {
               </div>
             ))}
           </div>
+        </BriefingSection>
+      )}
+
+      {/* Reach Out */}
+      {suggestions.length > 0 && (
+        <BriefingSection title={allPinged ? "All Reached Out" : "Reach Out"} icon="👋">
+          {allPinged ? (
+            <div className="bg-[var(--success)]/10 rounded-xl px-4 py-3 text-center">
+              <p className="text-sm text-[var(--success)]">
+                You&apos;ve reached out to everyone today. Nice work.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {suggestions.map((s) => {
+                const isPinged = pingedIds.has(s.id);
+                const isExpanded = expandedReachOutId === s.id;
+                return (
+                  <div
+                    key={s.id}
+                    className={`bg-[var(--bg-elevated)] rounded-xl px-4 py-3 ${isPinged ? "opacity-50" : ""}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {isPinged ? (
+                        <div className="w-4 h-4 rounded-full flex-shrink-0 mt-0.5 bg-[var(--success)]/20 flex items-center justify-center">
+                          <span className="text-[var(--success)] text-[10px]">✓</span>
+                        </div>
+                      ) : (
+                        <div
+                          className="w-3 h-3 rounded-full flex-shrink-0 mt-1"
+                          style={{ backgroundColor: s.color }}
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium ${isPinged ? "text-[var(--text-muted)] line-through" : "text-[var(--text-primary)]"}`}>
+                          {s.name}
+                        </div>
+                        {!isPinged && (
+                          <p className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                            {s.blurb}
+                          </p>
+                        )}
+                      </div>
+                      {!isPinged && !isExpanded && (
+                        <button
+                          onClick={() => { setExpandedReachOutId(s.id); setReachOutNote(""); }}
+                          disabled={logInteraction.isPending}
+                          className="text-xs bg-[var(--amber)] hover:bg-[var(--amber-hover)] disabled:opacity-50 text-[var(--bg-base)] font-medium px-2.5 py-1 rounded-lg transition-colors flex-shrink-0 mt-0.5"
+                        >
+                          Pinged
+                        </button>
+                      )}
+                    </div>
+                    {isExpanded && (
+                      <div className="mt-2 ml-6 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={reachOutNote}
+                          onChange={(e) => setReachOutNote(e.target.value)}
+                          placeholder="What about? (optional)"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handlePinged(s.id, reachOutNote);
+                            if (e.key === "Escape") { setExpandedReachOutId(null); setReachOutNote(""); }
+                          }}
+                          className="flex-1 bg-[var(--bg-card)] border border-[var(--border-medium)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--amber)]"
+                        />
+                        <button
+                          onClick={() => handlePinged(s.id, reachOutNote)}
+                          disabled={logInteraction.isPending}
+                          className="text-xs bg-[var(--amber)] hover:bg-[var(--amber-hover)] disabled:opacity-50 text-[var(--bg-base)] font-medium px-2.5 py-1.5 rounded-lg transition-colors flex-shrink-0"
+                        >
+                          Log
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </BriefingSection>
       )}
 

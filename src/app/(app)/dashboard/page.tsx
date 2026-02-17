@@ -6,7 +6,7 @@ import { useCalendarStatus } from "@/hooks/useCalendar";
 import BriefingView from "@/components/dashboard/BriefingView";
 import HealthCard from "@/components/dashboard/HealthCard";
 import StatsRow from "@/components/dashboard/StatsRow";
-import ReachOutCard from "@/components/dashboard/ReachOutCard";
+// ReachOutCard functionality is now integrated into BriefingView
 import NudgesCard from "@/components/dashboard/NudgesCard";
 import InsightCard from "@/components/dashboard/InsightCard";
 import NewPeopleCard from "@/components/dashboard/NewPeopleCard";
@@ -31,11 +31,6 @@ export default function DashboardPage() {
     <div className="h-full overflow-y-auto">
       {/* Morning Briefing — primary view */}
       <BriefingView />
-
-      {/* Reach Out (always visible below briefing) */}
-      <div className="max-w-[640px] mx-auto px-6 pb-4">
-        <ReachOutCard />
-      </div>
 
       {/* Zen divider before details */}
       <div className="max-w-[640px] mx-auto px-6 py-2">
