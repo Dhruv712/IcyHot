@@ -166,7 +166,10 @@ async function extractInsights(
   entryDate: string,
   contactList: { id: string; name: string }[]
 ): Promise<ExtractionResult | null> {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("[journal-extract] ANTHROPIC_API_KEY is not set!");
+    return null;
+  }
 
   try {
     const client = new Anthropic();
