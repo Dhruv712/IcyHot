@@ -175,11 +175,18 @@ async function extractInsights(
       ? contactList.map((c) => `- "${c.name}" (id: "${c.id}")`).join("\n")
       : "(no contacts yet)";
 
-    // Use streaming to avoid Vercel gateway timeout on long entries.
-    // Non-streaming waits for the full response before resolving, which
-    // can exceed the ~25s gateway timeout for large journal entries.
+    // Use Haiku for long entries to stay within Vercel Hobby 10s timeout.
+    // Sonnet gives higher quality extraction but takes 15-30s for long entries.
+    const LONG_ENTRY_THRESHOLD = 4000;
+    const model =
+      journalText.length >= LONG_ENTRY_THRESHOLD
+        ? "claude-haiku-4-20250514"
+        : "claude-sonnet-4-20250514";
+    console.log(`[journal-extract] Using model=${model} for ${journalText.length} chars`);
+
+    // Use streaming to keep the connection alive during generation.
     const stream = client.messages.stream({
-      model: "claude-sonnet-4-20250514",
+      model,
       max_tokens: 8192,
       messages: [
         {
