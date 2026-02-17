@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { contacts, interactions } from "@/db/schema";
+import { contacts, interactions, dailySuggestions } from "@/db/schema";
 import { auth } from "@/auth";
-import { eq, and, gte } from "drizzle-orm";
+import { eq, and, gte, sql } from "drizzle-orm";
 import { computeTemperature, temperatureToColor, temperatureLabel } from "@/lib/temperature";
 import { nudgeScore } from "@/lib/physics";
 import { RELATIONSHIP_LABELS } from "@/lib/constants";
@@ -26,6 +26,76 @@ export async function GET() {
 
   const userId = session.user.id!;
   const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+  // ── Check for cached suggestions for today ─────────────────────────
+  const cached = await db
+    .select({
+      contactId: dailySuggestions.contactId,
+      blurb: dailySuggestions.blurb,
+      name: contacts.name,
+      relationshipType: contacts.relationshipType,
+      importance: contacts.importance,
+      decayRateOverride: contacts.decayRateOverride,
+    })
+    .from(dailySuggestions)
+    .innerJoin(contacts, eq(dailySuggestions.contactId, contacts.id))
+    .where(
+      and(
+        eq(dailySuggestions.userId, userId),
+        eq(dailySuggestions.suggestedDate, todayStr)
+      )
+    );
+
+  if (cached.length > 0) {
+    // Recompute temperature live (it changes throughout the day as interactions happen)
+    const sixMonthsAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+    const cachedContactIds = cached.map((c) => c.contactId);
+    const cachedInteractions = await db
+      .select()
+      .from(interactions)
+      .where(
+        and(
+          eq(interactions.userId, userId),
+          gte(interactions.occurredAt, sixMonthsAgo)
+        )
+      );
+
+    const ixByContact = new Map<string, { occurredAt: Date }[]>();
+    for (const ix of cachedInteractions) {
+      if (cachedContactIds.includes(ix.contactId)) {
+        const arr = ixByContact.get(ix.contactId) || [];
+        arr.push({ occurredAt: ix.occurredAt });
+        ixByContact.set(ix.contactId, arr);
+      }
+    }
+
+    const suggestions: Suggestion[] = cached.map((c) => {
+      const contactIxs = ixByContact.get(c.contactId) || [];
+      const temperature = computeTemperature(
+        contactIxs,
+        c.relationshipType,
+        c.decayRateOverride,
+        now
+      );
+      const sorted = [...contactIxs].sort(
+        (a, b) => b.occurredAt.getTime() - a.occurredAt.getTime()
+      );
+      return {
+        id: c.contactId,
+        name: c.name,
+        temperature,
+        color: temperatureToColor(temperature),
+        relationshipType: c.relationshipType,
+        lastInteraction: sorted[0]?.occurredAt.toISOString() ?? null,
+        blurb: c.blurb,
+      };
+    });
+
+    return NextResponse.json({ suggestions });
+  }
+
+  // ── No cached suggestions — generate fresh ─────────────────────────
 
   // Fetch all contacts
   const allContacts = await db
@@ -133,6 +203,18 @@ export async function GET() {
       lastInteraction: c.lastInteraction?.toISOString() ?? null,
       blurb: buildTemplateBlurb(c, now),
     }));
+  }
+
+  // Save today's suggestions to DB for persistence across devices/refreshes
+  if (suggestions.length > 0) {
+    await db.insert(dailySuggestions).values(
+      suggestions.map((s) => ({
+        userId,
+        contactId: s.id,
+        blurb: s.blurb,
+        suggestedDate: todayStr,
+      }))
+    );
   }
 
   return NextResponse.json({ suggestions });

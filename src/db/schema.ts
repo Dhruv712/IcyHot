@@ -9,6 +9,7 @@ import {
   boolean,
   pgEnum,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const relationshipTypeEnum = pgEnum("relationship_type", [
@@ -194,6 +195,31 @@ export const journalOpenLoops = pgTable("journal_open_loops", {
   snoozedUntil: date("snoozed_until"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// ── Daily Suggestions ──────────────────────────────────────────────────
+
+export const dailySuggestions = pgTable(
+  "daily_suggestions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    contactId: uuid("contact_id")
+      .references(() => contacts.id, { onDelete: "cascade" })
+      .notNull(),
+    blurb: text("blurb").notNull(),
+    suggestedDate: date("suggested_date").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("daily_suggestions_user_date_contact").on(
+      table.userId,
+      table.suggestedDate,
+      table.contactId
+    ),
+  ]
+);
 
 export const journalNewPeople = pgTable("journal_new_people", {
   id: uuid("id").defaultRandom().primaryKey(),

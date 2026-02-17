@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import ForceGraph from "@/components/graph/ForceGraph";
 import type { ForceGraphHandle } from "@/components/graph/ForceGraph";
 import ContactPanel from "@/components/ContactPanel";
@@ -13,6 +14,22 @@ export default function GraphPage() {
   const { data: graphData, isLoading } = useGraphData();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const graphRef = useRef<ForceGraphHandle>(null);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const selectId = searchParams.get("select");
+
+  const contactNodes = graphData?.nodes ?? [];
+
+  // Auto-select node when navigating from contacts page with ?select=nodeId
+  useEffect(() => {
+    if (selectId && contactNodes.length > 0) {
+      const node = contactNodes.find((n) => n.id === selectId);
+      if (node) {
+        setSelectedNode(node);
+      }
+      router.replace("/", { scroll: false });
+    }
+  }, [selectId, contactNodes, router]);
 
   const handleWarmthBurst = useCallback((nodeId: string) => {
     graphRef.current?.triggerWarmthBurst(nodeId);
@@ -21,8 +38,6 @@ export default function GraphPage() {
   const handleNodeClick = useCallback((node: GraphNode | null) => {
     setSelectedNode(node);
   }, []);
-
-  const contactNodes = graphData?.nodes ?? [];
 
   return (
     <div className="h-full w-full relative">
