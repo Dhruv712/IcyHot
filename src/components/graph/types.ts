@@ -3,6 +3,7 @@ import type { SimulationNodeDatum } from "d3-force";
 export interface GraphNode extends SimulationNodeDatum {
   id: string;
   name: string;
+  email: string | null;
   temperature: number;
   importance: number;
   orbitalRadius: number;
@@ -15,6 +16,7 @@ export interface GraphNode extends SimulationNodeDatum {
   nudgeScore: number;
   interactionCount: number;
   relationshipType: string;
+  hasCalendarEvents: boolean;
 }
 
 export interface GraphGroup {

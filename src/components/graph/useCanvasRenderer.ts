@@ -3,6 +3,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import { drawNodes } from "./nodeRenderer";
 import type { GraphNode } from "./types";
+import { getOrbitRadii } from "@/lib/physics";
 
 interface Star {
   x: number;
@@ -63,7 +64,7 @@ export function useCanvasRenderer({
 
   // Generate starfield in CSS pixel space
   useEffect(() => {
-    const count = Math.min(200, Math.floor((width * height) / 6000));
+    const count = Math.min(120, Math.floor((width * height) / 10000));
     const stars: Star[] = [];
     for (let i = 0; i < count; i++) {
       stars.push({
@@ -90,11 +91,11 @@ export function useCanvasRenderer({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    // Dark background
-    ctx.fillStyle = "#08080f";
+    // Dark background — warm undertone
+    ctx.fillStyle = "#0a0a0f";
     ctx.fillRect(0, 0, width, height);
 
-    // Subtle radial gradient from center
+    // Subtle warm amber radial gradient from center
     const centerX = width / 2;
     const centerY = height / 2;
     const bgGradient = ctx.createRadialGradient(
@@ -105,7 +106,7 @@ export function useCanvasRenderer({
       centerY,
       Math.max(width, height) * 0.5
     );
-    bgGradient.addColorStop(0, "rgba(20, 20, 40, 0.8)");
+    bgGradient.addColorStop(0, "rgba(212, 168, 83, 0.03)");
     bgGradient.addColorStop(1, "transparent");
     ctx.fillStyle = bgGradient;
     ctx.fillRect(0, 0, width, height);
@@ -148,7 +149,7 @@ export function useCanvasRenderer({
       const twinkle =
         Math.sin(now * star.twinkleSpeed + star.twinkleOffset) * 0.3 + 0.7;
       ctx.globalAlpha = star.opacity * twinkle;
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "#f5f0e8";
       ctx.beginPath();
       ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
       ctx.fill();
@@ -165,50 +166,28 @@ export function useCanvasRenderer({
       );
     }
 
-    // Draw faint orbital rings with subtle pulse (CSS pixels)
+    // Draw orbital rings at quantized temperature bands (CSS pixels)
+    const orbitRadii = getOrbitRadii(width, height);
     const ringPulse = Math.sin(now * 0.0008) * 0.01 + 0.03;
-    const rings = [150, 300, 500, 750];
+    const bandLabels = ["Hot", "Warm", "Cool", "Cold"];
     if (isFocused) ctx.globalAlpha = 0.3;
-    ctx.strokeStyle = `rgba(255, 255, 255, ${ringPulse})`;
-    ctx.lineWidth = 1;
-    for (const r of rings) {
+    for (let i = 0; i < orbitRadii.length; i++) {
+      const r = orbitRadii[i];
+      // Inner rings slightly brighter
+      const ringAlpha = ringPulse * (1.0 - i * 0.15);
+      ctx.strokeStyle = `rgba(212, 168, 83, ${ringAlpha})`;
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
       ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
       ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
 
-    // Draw constellation lines between grouped nodes (dim in focus mode)
-    if (isFocused) ctx.globalAlpha = 0.15;
-    const groupMap = new Map<string, GraphNode[]>();
-    for (const node of nodes) {
-      if (node.groupIds.length > 0 && node.id !== "me") {
-        for (const gId of node.groupIds) {
-          const group = groupMap.get(gId) || [];
-          group.push(node);
-          groupMap.set(gId, group);
-        }
-      }
-    }
-    for (const [, groupNodes] of groupMap) {
-      if (groupNodes.length < 2) continue;
-      // Average temperature for pulse intensity
-      const avgTemp =
-        groupNodes.reduce((sum, n) => sum + n.temperature, 0) / groupNodes.length;
-      const pulse = Math.sin(now * 0.001) * 0.05 + 0.95;
-      const lineAlpha = (0.15 + avgTemp * 0.45) * pulse;
-      ctx.strokeStyle = `rgba(255, 255, 255, ${lineAlpha})`;
-      ctx.lineWidth = 1;
-      // Draw lines between all pairs
-      for (let i = 0; i < groupNodes.length; i++) {
-        for (let j = i + 1; j < groupNodes.length; j++) {
-          const a = groupNodes[i];
-          const b = groupNodes[j];
-          ctx.beginPath();
-          ctx.moveTo(a.x ?? 0, a.y ?? 0);
-          ctx.lineTo(b.x ?? 0, b.y ?? 0);
-          ctx.stroke();
-        }
+      // Band label (top of ring)
+      if (!isFocused) {
+        ctx.fillStyle = `rgba(212, 168, 83, ${0.12 - i * 0.02})`;
+        ctx.font = "9px Inter, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(bandLabels[i], centerX, centerY - r - 4);
       }
     }
     ctx.globalAlpha = 1;

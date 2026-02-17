@@ -105,6 +105,8 @@ export function useGraphInteraction({
     if (!canvas) return;
 
     let draggedNode: GraphNode | null = null;
+    let homeFx: number | null = null;
+    let homeFy: number | null = null;
 
     const d3Drag = drag<HTMLCanvasElement, unknown>()
       .subject((event) => {
@@ -119,8 +121,9 @@ export function useGraphInteraction({
       .on("start", (event) => {
         if (!event.subject) return;
         draggedNode = event.subject as GraphNode;
-        const sim = simulationRef.current;
-        if (sim) sim.alphaTarget(0.1).restart();
+        // Remember the pinned home position to restore on end
+        homeFx = draggedNode.fx ?? draggedNode.x ?? null;
+        homeFy = draggedNode.fy ?? draggedNode.y ?? null;
         draggedNode.fx = draggedNode.x;
         draggedNode.fy = draggedNode.y;
       })
@@ -133,11 +136,14 @@ export function useGraphInteraction({
       })
       .on("end", () => {
         if (!draggedNode) return;
-        const sim = simulationRef.current;
-        if (sim) sim.alphaTarget(0.02).alpha(0.5).restart();
-        draggedNode.fx = null;
-        draggedNode.fy = null;
+        // Snap back to pinned orbit position
+        draggedNode.fx = homeFx;
+        draggedNode.fy = homeFy;
+        draggedNode.x = homeFx ?? draggedNode.x;
+        draggedNode.y = homeFy ?? draggedNode.y;
         draggedNode = null;
+        homeFx = null;
+        homeFy = null;
       });
 
     select(canvas).call(d3Drag as never);

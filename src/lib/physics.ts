@@ -1,14 +1,36 @@
+// Quantized temperature bands — each maps to a proportional orbital ring.
+// The actual pixel radii are computed from viewport size via getOrbitRadii().
+// Band proportions: 0.25, 0.5, 0.75, 1.0 of maxRadius
+const ORBIT_PROPORTIONS = [0.25, 0.5, 0.75, 1.0];
+
+// Default radii used by the server-side API (not viewport-aware)
+export const ORBIT_RADII = [140, 280, 420, 560];
+
+// Compute viewport-fitted orbit radii.
+// maxRadius = half the smallest viewport dimension minus padding for
+// node size (~38px max) + label text (~14px) + breathing room (~8px) = 60px
+export function getOrbitRadii(width: number, height: number): number[] {
+  const padding = 60;
+  const maxRadius = Math.min(width, height) / 2 - padding;
+  return ORBIT_PROPORTIONS.map((p) => Math.max(40, p * maxRadius));
+}
+
+export function temperatureBand(temperature: number): number {
+  if (temperature > 0.75) return 0;
+  if (temperature > 0.50) return 1;
+  if (temperature > 0.25) return 2;
+  return 3;
+}
+
 export function computeNodeProperties(
   temperature: number,
   importance: number
 ) {
   const mass = importance;
 
-  // Temperature is the PRIMARY driver of orbit distance (cold = far)
-  // Importance is a subtle secondary factor (important = slightly closer)
-  const baseRadius = 80 + (10 - importance) * 15; // 80..215
-  const coldnessFactor = 1 + (1 - temperature) * 2.5; // 1.0..3.5
-  const orbitalRadius = baseRadius * coldnessFactor;
+  // Quantized orbit based on temperature band
+  const band = temperatureBand(temperature);
+  const orbitalRadius = ORBIT_RADII[band];
 
   // Node size proportional to importance
   const nodeRadius = 8 + importance * 3; // 11..38 pixels

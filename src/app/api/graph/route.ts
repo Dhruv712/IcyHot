@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { contacts, interactions, groups, contactGroups } from "@/db/schema";
+import { contacts, interactions, groups, contactGroups, calendarEventContacts } from "@/db/schema";
 import { auth } from "@/auth";
 import { eq, and, gte } from "drizzle-orm";
 import { computeTemperature, temperatureToColor } from "@/lib/temperature";
@@ -51,6 +51,12 @@ export async function GET() {
     groupsByContact.set(m.contactId, existing);
   }
 
+  // Fetch contacts that have calendar event matches
+  const calendarMatches = await db
+    .select({ contactId: calendarEventContacts.contactId })
+    .from(calendarEventContacts);
+  const contactsWithCalendar = new Set(calendarMatches.map((m) => m.contactId));
+
   // Group interactions by contactId
   const interactionsByContact = new Map<
     string,
@@ -94,6 +100,7 @@ export async function GET() {
     return {
       id: contact.id,
       name: contact.name,
+      email: contact.email ?? null,
       relationshipType: contact.relationshipType,
       importance: contact.importance,
       temperature,
@@ -113,6 +120,7 @@ export async function GET() {
       lastInteraction: lastInteraction?.toISOString() ?? null,
       nudgeScore: nudgeScore(temperature, contact.importance),
       interactionCount: contactInteractions.length,
+      hasCalendarEvents: contactsWithCalendar.has(contact.id),
     };
   });
 

@@ -44,7 +44,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { name, relationshipType, importance, notes, groupIds, decayRateOverride } = body;
+  const { name, relationshipType, importance, notes, groupIds, decayRateOverride, email } = body;
 
   const [updated] = await db
     .update(contacts)
@@ -53,6 +53,7 @@ export async function PUT(
       ...(relationshipType !== undefined && { relationshipType }),
       ...(importance !== undefined && { importance }),
       ...(notes !== undefined && { notes }),
+      ...(email !== undefined && { email: email || null }),
       ...(decayRateOverride !== undefined && {
         decayRateOverride: decayRateOverride || null,
       }),

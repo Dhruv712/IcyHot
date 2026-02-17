@@ -30,11 +30,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async signIn({ user, account }) {
-      const allowed = process.env.ALLOWED_EMAIL;
-      // if (allowed && user.email !== allowed) {
-      //   return false;
-      // }
-
       // Upsert user in our database
       const db = getDb();
       const existing = await db

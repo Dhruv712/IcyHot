@@ -36,7 +36,7 @@ export function drawNodes(
     // Glow effect for warm nodes (with breathing animation)
     if (node.temperature > 0.2 && node.id !== "me") {
       const breathe =
-        Math.sin(time * 0.0015 + idx * 0.7) * 0.15 + 0.85;
+        Math.sin(time * 0.0015 + idx * 0.7) * 0.08 + 0.92;
       const glowRadius =
         node.nodeRadius * (1.5 + node.temperature * 1.5) * breathe;
       const gradient = ctx.createRadialGradient(
@@ -71,7 +71,7 @@ export function drawNodes(
       );
       gradient.addColorStop(
         0,
-        `rgba(255, 255, 255, ${(0.2 * pulse).toFixed(2)})`
+        `rgba(245, 240, 232, ${(0.2 * pulse).toFixed(2)})`
       );
       gradient.addColorStop(1, "transparent");
       ctx.fillStyle = gradient;
@@ -88,15 +88,15 @@ export function drawNodes(
         y,
         node.nodeRadius
       );
-      coreGradient.addColorStop(0, "#ffffff");
-      coreGradient.addColorStop(1, "#c0c0c0");
+      coreGradient.addColorStop(0, "#f5f0e8");
+      coreGradient.addColorStop(1, "#b8a88a");
       ctx.fillStyle = coreGradient;
       ctx.beginPath();
       ctx.arc(x, y, node.nodeRadius, 0, Math.PI * 2);
       ctx.fill();
 
       // Label in CSS pixels
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "#f5f0e8";
       ctx.font = `bold 16px Inter, system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -123,13 +123,13 @@ export function drawNodes(
 
     // Selection/hover ring (CSS pixels)
     if (node.id === selectedNodeId) {
-      ctx.strokeStyle = "#ffffff";
+      ctx.strokeStyle = "#d4a853";
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(x, y, node.nodeRadius + 4, 0, Math.PI * 2);
       ctx.stroke();
     } else if (node.id === hoveredNodeId) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+      ctx.strokeStyle = "rgba(212, 168, 83, 0.5)";
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(x, y, node.nodeRadius + 3, 0, Math.PI * 2);
@@ -137,12 +137,13 @@ export function drawNodes(
     }
 
     // Name label in CSS pixels
-    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.fillStyle = "rgba(245, 240, 232, 0.8)";
     const fontSize = Math.max(10, 9 + node.importance * 0.4);
     ctx.font = `${Math.round(fontSize)}px Inter, system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillText(node.name, x, y + node.nodeRadius + 6);
+    const nameText = node.hasCalendarEvents ? `📅 ${node.name}` : node.name;
+    ctx.fillText(nameText, x, y + node.nodeRadius + 6);
 
     // Reset alpha after each node in focus mode
     if (isFocusMode) ctx.globalAlpha = 1;

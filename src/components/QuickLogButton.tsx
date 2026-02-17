@@ -20,9 +20,7 @@ const SENTIMENTS = [
 export default function QuickLogButton({ nodes, groups, onInteractionLogged }: QuickLogButtonProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  // Multi-select: set of node IDs
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // Step 2: confirmed selection, show sentiment/date
   const [confirmed, setConfirmed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const logInteraction = useLogInteraction();
@@ -59,14 +57,12 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Non-"me" nodes only
   const contactNodes = nodes.filter((n) => n.id !== "me");
 
   const filtered = contactNodes.filter((n) =>
     n.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Groups that have 2+ members
   const groupsWithMembers = groups
     .map((g) => ({
       ...g,
@@ -92,7 +88,6 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
       .map((n) => n.id);
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      // If all members already selected, deselect them (toggle behavior)
       const allSelected = memberIds.every((id) => next.has(id));
       if (allSelected) {
         memberIds.forEach((id) => next.delete(id));
@@ -109,7 +104,6 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
     }
   };
 
-  // Single-click on name: select just one and go straight to step 2
   const handleSingleSelect = (node: GraphNode) => {
     setSelectedIds(new Set([node.id]));
     setConfirmed(true);
@@ -120,7 +114,6 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
     setLogging(true);
 
     const ids = Array.from(selectedIds);
-    // Fire all mutations in parallel
     await Promise.all(
       ids.map(
         (id) =>
@@ -165,7 +158,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
       {/* FAB */}
       <button
         onClick={() => setOpen(true)}
-        className="fixed right-4 bottom-4 w-12 h-12 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg shadow-blue-600/25 flex items-center justify-center text-xl z-30 transition-colors"
+        className="fixed right-4 bottom-4 w-12 h-12 bg-[var(--amber)] hover:bg-[var(--amber-hover)] text-[var(--bg-base)] rounded-full shadow-lg shadow-[var(--amber)]/25 flex items-center justify-center text-xl z-30 transition-colors font-medium"
         title="Log interaction (L)"
       >
         +
@@ -175,10 +168,10 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
       {open && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-32">
           <div
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={handleClose}
           />
-          <div className="relative bg-gray-950 border border-gray-800 rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
+          <div className="relative bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
             {!confirmed ? (
               <>
                 <input
@@ -187,10 +180,10 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Who did you hang out with?"
-                  className="w-full bg-transparent px-4 py-3 text-white placeholder-gray-500 focus:outline-none border-b border-gray-800"
+                  className="w-full bg-transparent px-4 py-3 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none border-b border-[var(--border-subtle)]"
                 />
 
-                {/* Group shortcuts — show when not searching */}
+                {/* Group shortcuts */}
                 {!search && groupsWithMembers.length > 0 && (
                   <div className="px-4 pt-3 pb-1 flex flex-wrap gap-1.5">
                     {groupsWithMembers.map((g) => {
@@ -201,8 +194,8 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                           onClick={() => selectGroup(g.id)}
                           className={`text-xs px-2.5 py-1 rounded-full transition-all border ${
                             allSelected
-                              ? "bg-blue-600/20 border-blue-500 text-blue-300"
-                              : "bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                              ? "bg-[var(--amber-ghost-bg)] border-[var(--amber)] text-[var(--amber)]"
+                              : "bg-[var(--bg-elevated)] border-[var(--border-medium)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text-secondary)]"
                           }`}
                         >
                           {g.name} ({g.members.length})
@@ -214,24 +207,24 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
 
                 {/* Selected count + next button */}
                 {selectedIds.size > 0 && (
-                  <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
+                  <div className="px-4 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between">
                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                       {selectedNodes.slice(0, 5).map((n) => (
                         <span
                           key={n.id}
-                          className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full flex items-center gap-1"
+                          className="text-xs bg-[var(--bg-elevated)] text-[var(--text-secondary)] px-2 py-0.5 rounded-full flex items-center gap-1"
                         >
                           <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: n.color }} />
                           {n.name}
                         </span>
                       ))}
                       {selectedIds.size > 5 && (
-                        <span className="text-xs text-gray-500">+{selectedIds.size - 5} more</span>
+                        <span className="text-xs text-[var(--text-muted)]">+{selectedIds.size - 5} more</span>
                       )}
                     </div>
                     <button
                       onClick={handleConfirm}
-                      className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg transition-colors ml-2 flex-shrink-0"
+                      className="text-xs bg-[var(--amber)] hover:bg-[var(--amber-hover)] text-[var(--bg-base)] font-medium px-3 py-1 rounded-lg transition-colors ml-2 flex-shrink-0"
                     >
                       Next &rarr;
                     </button>
@@ -241,7 +234,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                 {/* Contact list with checkboxes */}
                 <div className="max-h-48 overflow-y-auto">
                   {filtered.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-gray-500">
+                    <div className="px-4 py-3 text-sm text-[var(--text-muted)]">
                       No contacts found
                     </div>
                   ) : (
@@ -250,24 +243,22 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                       return (
                         <div
                           key={node.id}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-900 transition-colors text-left"
+                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--bg-elevated)] transition-colors text-left"
                         >
-                          {/* Checkbox for multi-select */}
                           <button
                             onClick={() => toggleNode(node.id)}
                             className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
                               isSelected
-                                ? "bg-blue-600 border-blue-500"
-                                : "border-gray-600 hover:border-gray-400"
+                                ? "bg-[var(--amber)] border-[var(--amber)]"
+                                : "border-[var(--border-medium)] hover:border-[var(--text-muted)]"
                             }`}
                           >
                             {isSelected && (
-                              <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <svg className="w-2.5 h-2.5 text-[var(--bg-base)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                               </svg>
                             )}
                           </button>
-                          {/* Name — single click goes straight to step 2 */}
                           <button
                             onClick={() => handleSingleSelect(node)}
                             className="flex items-center gap-2 flex-1 min-w-0"
@@ -276,7 +267,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                               className="w-3 h-3 rounded-full flex-shrink-0"
                               style={{ backgroundColor: node.color }}
                             />
-                            <span className="text-sm text-white truncate">{node.name}</span>
+                            <span className="text-sm text-[var(--text-primary)] truncate">{node.name}</span>
                           </button>
                         </div>
                       );
@@ -285,13 +276,13 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                 </div>
               </>
             ) : (
-              <div className="p-4">
+              <div className="p-5">
                 {/* Show who we're logging for */}
                 <div className="text-center mb-3">
-                  <div className="text-sm text-gray-400">
+                  <div className="text-sm text-[var(--text-secondary)]">
                     {selectedIds.size === 1 ? "Talked to" : "Hung out with"}
                   </div>
-                  <div className="text-lg font-semibold text-white">
+                  <div className="text-lg font-semibold text-[var(--text-primary)]">
                     {selectedIds.size <= 3
                       ? selectedNodes.map((n) => n.name).join(", ")
                       : `${selectedNodes.slice(0, 2).map((n) => n.name).join(", ")} & ${selectedIds.size - 2} more`}
@@ -303,7 +294,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                   {!showDatePicker ? (
                     <button
                       onClick={() => setShowDatePicker(true)}
-                      className="text-xs text-gray-400 hover:text-white transition-colors bg-gray-900 hover:bg-gray-800 px-2 py-1 rounded"
+                      className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors bg-[var(--bg-elevated)] hover:bg-[var(--bg-base)] px-2 py-1 rounded-lg"
                     >
                       {occurredAt
                         ? new Date(occurredAt + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
@@ -316,11 +307,11 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                         value={occurredAt || new Date().toISOString().slice(0, 10)}
                         max={new Date().toISOString().slice(0, 10)}
                         onChange={(e) => setOccurredAt(e.target.value)}
-                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-gray-500 [color-scheme:dark]"
+                        className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-lg px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--amber)] [color-scheme:dark]"
                       />
                       <button
                         onClick={() => { setOccurredAt(""); setShowDatePicker(false); }}
-                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors px-1"
+                        className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors px-1"
                         title="Reset to today"
                       >
                         ✕
@@ -330,24 +321,24 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                 </div>
 
                 {/* Sentiment */}
-                <div className="text-xs text-gray-500 text-center mb-2">How&apos;d it go?</div>
+                <div className="text-xs text-[var(--text-muted)] text-center mb-2">How&apos;d it go?</div>
                 <div className="flex justify-center gap-2 mb-3">
                   {SENTIMENTS.map((s) => (
                     <button
                       key={s.value}
                       onClick={() => handleLogWithSentiment(s.value)}
                       disabled={logging}
-                      className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 transition-colors disabled:opacity-50"
+                      className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--amber-ghost-bg)] transition-colors disabled:opacity-50"
                     >
                       <span className="text-xl">{s.emoji}</span>
-                      <span className="text-[10px] text-gray-400">{s.label}</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">{s.label}</span>
                     </button>
                   ))}
                 </div>
                 <button
                   onClick={() => handleLogWithSentiment()}
                   disabled={logging}
-                  className="w-full text-xs text-gray-500 hover:text-gray-300 transition-colors py-1 disabled:opacity-50"
+                  className="w-full text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors py-1 disabled:opacity-50"
                 >
                   {logging ? "Logging..." : "Skip \u2014 just log it"}
                 </button>
@@ -355,7 +346,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
                 {/* Back button */}
                 <button
                   onClick={() => setConfirmed(false)}
-                  className="w-full text-xs text-gray-600 hover:text-gray-400 transition-colors py-1 mt-1"
+                  className="w-full text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors py-1 mt-1"
                 >
                   &larr; Back
                 </button>

@@ -73,7 +73,9 @@ export async function POST(req: NextRequest) {
       userId: session.user.id!,
       note: note || null,
       sentiment: validSentiments.includes(sentiment) ? sentiment : null,
-      occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+      occurredAt: occurredAt
+        ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(occurredAt) ? occurredAt + "T12:00:00" : occurredAt)
+        : new Date(),
     })
     .returning();
 

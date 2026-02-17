@@ -3,22 +3,23 @@
 interface HealthScoreProps {
   score: number;
   contactCount: number;
+  compact?: boolean;
 }
 
-export default function HealthScore({ score, contactCount }: HealthScoreProps) {
+export default function HealthScore({ score, contactCount, compact = false }: HealthScoreProps) {
   const color =
     score >= 70
-      ? "text-emerald-400"
+      ? "text-[var(--success)]"
       : score >= 40
-        ? "text-yellow-400"
-        : "text-red-400";
+        ? "text-[var(--amber)]"
+        : "text-[var(--danger)]";
 
   const ringColor =
     score >= 70
-      ? "stroke-emerald-400"
+      ? "stroke-[var(--success)]"
       : score >= 40
-        ? "stroke-yellow-400"
-        : "stroke-red-400";
+        ? "stroke-[var(--amber)]"
+        : "stroke-[var(--danger)]";
 
   const label =
     score >= 80
@@ -38,8 +39,8 @@ export default function HealthScore({ score, contactCount }: HealthScoreProps) {
 
   if (contactCount === 0) {
     return (
-      <div className="flex items-center gap-2 text-gray-500 text-sm">
-        <span>Add people to see your network health</span>
+      <div className="flex items-center gap-2 text-[var(--text-muted)] text-sm">
+        {!compact && <span>Add people to see your network health</span>}
       </div>
     );
   }
@@ -57,7 +58,7 @@ export default function HealthScore({ score, contactCount }: HealthScoreProps) {
             fill="none"
             stroke="currentColor"
             strokeWidth="3"
-            className="text-gray-800"
+            className="text-[var(--border-medium)]"
           />
           {/* Progress ring */}
           <circle
@@ -79,12 +80,14 @@ export default function HealthScore({ score, contactCount }: HealthScoreProps) {
           {score}
         </span>
       </div>
-      <div className="hidden sm:block">
-        <div className={`text-sm font-semibold ${color}`}>{label}</div>
-        <div className="text-[10px] text-gray-500">
-          {contactCount} {contactCount === 1 ? "person" : "people"}
+      {!compact && (
+        <div className="hidden sm:block">
+          <div className={`text-sm font-semibold ${color}`}>{label}</div>
+          <div className="text-[10px] text-[var(--text-muted)]">
+            {contactCount} {contactCount === 1 ? "person" : "people"}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

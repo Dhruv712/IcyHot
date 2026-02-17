@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { name, relationshipType, importance, notes, groupIds } = body;
+  const { name, relationshipType, importance, notes, groupIds, email } = body;
 
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
       relationshipType: relationshipType || "friend",
       importance: importance ?? 5,
       notes: notes || null,
+      email: email || null,
     })
     .returning();
 

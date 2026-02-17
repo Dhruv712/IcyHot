@@ -1,9 +1,48 @@
 @import "tailwindcss";
 
+:root {
+  /* Backgrounds */
+  --bg-base: #0a0a0f;
+  --bg-card: #111118;
+  --bg-elevated: #1a1a24;
+
+  /* Borders */
+  --border-subtle: #1e1e2a;
+  --border-medium: #2a2a38;
+
+  /* Text */
+  --text-primary: #f5f0e8;
+  --text-secondary: #a09888;
+  --text-muted: #5c5650;
+
+  /* Amber accent */
+  --amber: #d4a853;
+  --amber-hover: #c49540;
+  --amber-active: #b8892e;
+  --amber-ghost-bg: rgba(212, 168, 83, 0.12);
+
+  /* Semantic */
+  --success: #5cb870;
+  --danger: #c45c5c;
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
   overflow: hidden;
   height: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

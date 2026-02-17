@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 interface CreateContactInput {
   name: string;
+  email?: string;
   relationshipType?: string;
   importance?: number;
   notes?: string;
@@ -11,6 +12,7 @@ interface CreateContactInput {
 }
 
 interface UpdateContactInput extends Partial<CreateContactInput> {
+  email?: string;
   groupIds?: string[];
   decayRateOverride?: number | null;
 }
