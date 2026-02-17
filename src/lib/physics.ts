@@ -38,6 +38,20 @@ export function computeNodeProperties(
   return { mass, orbitalRadius, nodeRadius };
 }
 
+// Scale a node radius proportionally to the viewport.
+// On the "design target" (outermost orbit ≈ 560px) the scale factor is ~1.0.
+// On smaller viewports the nodes shrink to match, with a floor of 6px.
+const DESIGN_TARGET_MAX_ORBIT = ORBIT_RADII[ORBIT_RADII.length - 1]; // 560
+
+export function scaleNodeRadius(
+  baseRadius: number,
+  orbitRadii: number[]
+): number {
+  const actualMax = orbitRadii[orbitRadii.length - 1] || DESIGN_TARGET_MAX_ORBIT;
+  const factor = Math.min(1, actualMax / DESIGN_TARGET_MAX_ORBIT);
+  return Math.max(6, baseRadius * factor);
+}
+
 export function nudgeScore(temperature: number, importance: number): number {
   return importance * (1 - temperature);
 }

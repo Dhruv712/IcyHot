@@ -7,7 +7,7 @@ import {
   type Simulation,
 } from "d3-force";
 import type { GraphNode } from "./types";
-import { temperatureBand, getOrbitRadii } from "@/lib/physics";
+import { temperatureBand, getOrbitRadii, scaleNodeRadius } from "@/lib/physics";
 
 interface UseForceSimulationOptions {
   width: number;
@@ -61,6 +61,57 @@ function sortByGroupProximity(nodes: GraphNode[]): GraphNode[] {
   return result;
 }
 
+/**
+ * Enforce a per-orbit capacity cap. If a ring has more nodes than can
+ * comfortably fit, push overflow to the next ring outward.
+ *
+ * Capacity = floor(circumference / minSpacing) where
+ * minSpacing = 2 * avgScaledNodeRadius + 20px gap.
+ *
+ * Processes bands 0→3 (inner→outer). Band 3 absorbs all overflow.
+ */
+function applyOverflowCap(
+  buckets: Map<number, GraphNode[]>,
+  orbitRadii: number[]
+): Map<number, GraphNode[]> {
+  const result = new Map<number, GraphNode[]>();
+  // Copy buckets so we don't mutate the input
+  for (const [band, nodes] of buckets) {
+    result.set(band, [...nodes]);
+  }
+
+  for (let band = 0; band < 3; band++) {
+    const bucket = result.get(band);
+    if (!bucket || bucket.length <= 1) continue;
+
+    const radius = orbitRadii[band];
+    const circumference = 2 * Math.PI * radius;
+
+    // Average scaled node radius in this bucket
+    const avgRadius =
+      bucket.reduce((sum, n) => sum + n.nodeRadius, 0) / bucket.length;
+    const minSpacing = 2 * avgRadius + 20;
+    const capacity = Math.max(1, Math.floor(circumference / minSpacing));
+
+    if (bucket.length > capacity) {
+      // Sort by nudgeScore desc so the most important stay on this ring
+      const sorted = [...bucket].sort((a, b) => b.nudgeScore - a.nudgeScore);
+      const keep = sorted.slice(0, capacity);
+      const overflow = sorted.slice(capacity);
+
+      result.set(band, keep);
+
+      // Push overflow to next band
+      const nextBand = band + 1;
+      const nextBucket = result.get(nextBand) || [];
+      nextBucket.push(...overflow);
+      result.set(nextBand, nextBucket);
+    }
+  }
+
+  return result;
+}
+
 export function useForceSimulation({
   width,
   height,
@@ -89,7 +140,8 @@ export function useForceSimulation({
       temperature: 1,
       importance: 10,
       orbitalRadius: 0,
-      nodeRadius: 32,
+      baseNodeRadius: 32,
+      nodeRadius: scaleNodeRadius(32, orbitRadii),
       color: "#f5f5f5",
       mass: 10,
       groupIds: [],
@@ -105,20 +157,28 @@ export function useForceSimulation({
       fy: cy,
     };
 
-    // Bucket nodes by orbit band
+    // Bucket nodes by orbit band, applying viewport-scaled node radius
     const orbitBuckets = new Map<number, GraphNode[]>();
     for (const node of newNodes) {
       const band = temperatureBand(node.temperature);
       const bucket = orbitBuckets.get(band) || [];
-      bucket.push(node);
+      const base = node.baseNodeRadius ?? node.nodeRadius;
+      bucket.push({
+        ...node,
+        baseNodeRadius: base,
+        nodeRadius: scaleNodeRadius(base, orbitRadii),
+      });
       orbitBuckets.set(band, bucket);
     }
+
+    // Enforce per-orbit capacity cap — overflow to next ring outward
+    const cappedBuckets = applyOverflowCap(orbitBuckets, orbitRadii);
 
     // Assign fixed positions: evenly spaced around each orbit,
     // sorted so group members are adjacent
     const mergedNodes: GraphNode[] = [meNode];
 
-    for (const [band, bucket] of orbitBuckets) {
+    for (const [band, bucket] of cappedBuckets) {
       const sorted = sortByGroupProximity(bucket);
       const radius = orbitRadii[band];
       const count = sorted.length;
@@ -180,24 +240,28 @@ export function useForceSimulation({
     // Recompute fixed positions for all non-me nodes
     const orbitBuckets = new Map<number, GraphNode[]>();
     for (const node of nodesRef.current) {
-      if (node.id === "me") continue;
+      if (node.id === "me") {
+        // Update "me" node size + position
+        node.nodeRadius = scaleNodeRadius(32, orbitRadii);
+        node.x = cx;
+        node.y = cy;
+        node.fx = cx;
+        node.fy = cy;
+        continue;
+      }
+      // Re-scale node radius from base (avoids double-scaling)
+      node.nodeRadius = scaleNodeRadius(node.baseNodeRadius, orbitRadii);
       const band = temperatureBand(node.temperature);
       const bucket = orbitBuckets.get(band) || [];
       bucket.push(node);
       orbitBuckets.set(band, bucket);
     }
 
-    // Update "me" node
-    const meNode = nodesRef.current.find((n) => n.id === "me");
-    if (meNode) {
-      meNode.x = cx;
-      meNode.y = cy;
-      meNode.fx = cx;
-      meNode.fy = cy;
-    }
+    // Enforce per-orbit capacity cap
+    const cappedBuckets = applyOverflowCap(orbitBuckets, orbitRadii);
 
     // Update all orbit nodes
-    for (const [band, bucket] of orbitBuckets) {
+    for (const [band, bucket] of cappedBuckets) {
       const sorted = sortByGroupProximity(bucket);
       const radius = orbitRadii[band];
       const count = sorted.length;

@@ -108,6 +108,7 @@ export async function GET() {
       mass,
       orbitalRadius,
       nodeRadius,
+      baseNodeRadius: nodeRadius,
       groupIds: groupsByContact.get(contact.id) ?? [],
       groupAngle: (() => {
         const gIds = groupsByContact.get(contact.id);

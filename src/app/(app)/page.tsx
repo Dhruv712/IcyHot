@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import ForceGraph from "@/components/graph/ForceGraph";
 import type { ForceGraphHandle } from "@/components/graph/ForceGraph";
@@ -12,7 +12,7 @@ import type { GraphNode } from "@/components/graph/types";
 
 export default function GraphPage() {
   const { data: graphData, isLoading } = useGraphData();
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const graphRef = useRef<ForceGraphHandle>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -20,12 +20,18 @@ export default function GraphPage() {
 
   const contactNodes = graphData?.nodes ?? [];
 
+  // Derive selectedNode from graphData so it always reflects the latest data
+  const selectedNode = useMemo(
+    () => (selectedNodeId ? contactNodes.find((n) => n.id === selectedNodeId) ?? null : null),
+    [selectedNodeId, contactNodes]
+  );
+
   // Auto-select node when navigating from contacts page with ?select=nodeId
   useEffect(() => {
     if (selectId && contactNodes.length > 0) {
       const node = contactNodes.find((n) => n.id === selectId);
       if (node) {
-        setSelectedNode(node);
+        setSelectedNodeId(node.id);
       }
       router.replace("/", { scroll: false });
     }
@@ -36,7 +42,7 @@ export default function GraphPage() {
   }, []);
 
   const handleNodeClick = useCallback((node: GraphNode | null) => {
-    setSelectedNode(node);
+    setSelectedNodeId(node?.id ?? null);
   }, []);
 
   return (
@@ -61,7 +67,7 @@ export default function GraphPage() {
       {selectedNode && (
         <ContactPanel
           node={selectedNode}
-          onClose={() => setSelectedNode(null)}
+          onClose={() => setSelectedNodeId(null)}
           onInteractionLogged={handleWarmthBurst}
         />
       )}

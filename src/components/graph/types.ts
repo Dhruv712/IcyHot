@@ -8,6 +8,7 @@ export interface GraphNode extends SimulationNodeDatum {
   importance: number;
   orbitalRadius: number;
   nodeRadius: number;
+  baseNodeRadius: number; // unscaled radius from API (importance-based)
   color: string;
   mass: number;
   groupIds: string[];
