@@ -36,6 +36,7 @@ export async function getGoogleAccessToken(
         grant_type: "refresh_token",
         refresh_token: account.refreshToken,
       }),
+      cache: "no-store",
     });
 
     if (!response.ok) {

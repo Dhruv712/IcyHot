@@ -199,6 +199,7 @@ async function fetchEventsFromGoogle(
 
     const response = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
     });
 
     if (!response.ok) {

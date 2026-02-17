@@ -23,6 +23,7 @@ export async function listJournalFiles(): Promise<GitHubFile[]> {
         Authorization: `Bearer ${pat}`,
         Accept: "application/vnd.github.v3+json",
       },
+      cache: "no-store",
     }
   );
 
@@ -49,6 +50,7 @@ export async function getJournalFileContent(path: string): Promise<string> {
         Authorization: `Bearer ${pat}`,
         Accept: "application/vnd.github.v3+json",
       },
+      cache: "no-store",
     }
   );
 
