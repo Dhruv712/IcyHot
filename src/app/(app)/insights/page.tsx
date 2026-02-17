@@ -80,6 +80,11 @@ function InsightsContent() {
                       {insight.contactName}
                     </span>
                   )}
+                  {insight.reinforcementCount > 1 && (
+                    <span className="bg-[var(--amber-ghost-bg)] text-[var(--amber)] px-2 py-0.5 rounded-lg font-medium">
+                      Observed {insight.reinforcementCount}×
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

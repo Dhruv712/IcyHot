@@ -31,12 +31,14 @@ export async function GET(req: NextRequest) {
       contactId: journalInsights.contactId,
       contactName: contacts.name,
       content: journalInsights.content,
+      reinforcementCount: journalInsights.reinforcementCount,
+      relevanceScore: journalInsights.relevanceScore,
       createdAt: journalInsights.createdAt,
     })
     .from(journalInsights)
     .leftJoin(contacts, eq(journalInsights.contactId, contacts.id))
     .where(and(...conditions))
-    .orderBy(desc(journalInsights.entryDate))
+    .orderBy(desc(journalInsights.relevanceScore))
     .limit(100);
 
   return NextResponse.json(results);

@@ -25,6 +25,8 @@ export interface JournalInsight {
   contactId: string | null;
   contactName: string | null;
   content: string;
+  reinforcementCount: number;
+  relevanceScore: number;
   createdAt: string;
 }
 

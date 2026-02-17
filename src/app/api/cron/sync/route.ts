@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { syncJournalEntries } from "@/lib/journal";
 import { syncCalendarEvents } from "@/lib/calendar";
+import { generateDailyBriefing } from "@/lib/briefing";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -19,6 +20,7 @@ export async function GET(request: NextRequest) {
     userId: string;
     journal: { success: boolean; error?: string };
     calendar: { success: boolean; error?: string };
+    briefing: { success: boolean; error?: string };
   }> = [];
 
   for (const user of allUsers) {
@@ -26,6 +28,7 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       journal: { success: false } as { success: boolean; error?: string },
       calendar: { success: false } as { success: boolean; error?: string },
+      briefing: { success: false } as { success: boolean; error?: string },
     };
 
     try {
@@ -45,6 +48,18 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error(`[cron] Calendar sync failed for ${user.id}:`, error);
       result.calendar = {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+
+    // Generate daily briefing after sync completes
+    try {
+      await generateDailyBriefing(user.id);
+      result.briefing = { success: true };
+    } catch (error) {
+      console.error(`[cron] Briefing generation failed for ${user.id}:`, error);
+      result.briefing = {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };

@@ -100,11 +100,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const contactNodes = graphData?.nodes ?? [];
 
+  // Count important contacts that are going cold (importance ≥ 7, temperature < 0.3)
+  const driftingCount = contactNodes.filter(
+    (n) => n.importance >= 7 && n.temperature < 0.3
+  ).length;
+
   return (
     <div className="h-screen w-screen flex overflow-hidden">
       <Sidebar
         healthScore={graphData?.healthScore ?? 0}
         contactCount={contactNodes.length}
+        driftingCount={driftingCount}
         onAddPerson={() => setShowAddDialog(true)}
         onSyncCalendar={handleSyncCalendar}
         onSyncJournal={handleSyncJournal}

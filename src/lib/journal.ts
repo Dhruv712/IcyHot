@@ -8,7 +8,7 @@ import {
   journalOpenLoops,
   journalNewPeople,
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { listJournalFiles, getJournalFileContent, parseJournalDate } from "./github";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -287,6 +287,97 @@ Guidelines:
   }
 }
 
+// ── Insight Reinforcement ──────────────────────────────────────────────
+
+/** Compute relevance score: reinforcement × recency decay × importance boost */
+function computeRelevanceScore(
+  reinforcementCount: number,
+  lastReinforcedAt: Date,
+  contactImportance?: number
+): number {
+  const daysSinceReinforced =
+    (Date.now() - lastReinforcedAt.getTime()) / (1000 * 60 * 60 * 24);
+  // Slow decay — half-life of 60 days (insights stay relevant much longer than interactions)
+  const recencyDecay = Math.exp((-Math.LN2 / 60) * daysSinceReinforced);
+  const importanceBoost = contactImportance && contactImportance >= 7 ? 1.5 : 1.0;
+  return reinforcementCount * recencyDecay * importanceBoost;
+}
+
+/** Check if two insight strings are semantically similar (word overlap >60%) */
+function insightsAreSimilar(a: string, b: string): boolean {
+  const aLower = a.toLowerCase();
+  const bLower = b.toLowerCase();
+  // Substring containment
+  if (aLower.includes(bLower) || bLower.includes(aLower)) return true;
+  // Word overlap
+  const aWords = new Set(aLower.split(/\s+/).filter((w) => w.length > 3));
+  const bWords = new Set(bLower.split(/\s+/).filter((w) => w.length > 3));
+  if (aWords.size === 0 || bWords.size === 0) return false;
+  const overlap = [...aWords].filter((w) => bWords.has(w)).length;
+  return overlap / Math.min(aWords.size, bWords.size) > 0.6;
+}
+
+/**
+ * Try to reinforce an existing insight instead of creating a duplicate.
+ * Returns true if an existing insight was reinforced, false if we should insert new.
+ */
+async function tryReinforceInsight(
+  userId: string,
+  category: string,
+  content: string,
+  contactId: string | null,
+  entryDate: string,
+  contactImportance?: number
+): Promise<boolean> {
+  // Fetch existing insights in this category for this user (limit to recent ones for performance)
+  const existing = await db
+    .select({
+      id: journalInsights.id,
+      content: journalInsights.content,
+      reinforcementCount: journalInsights.reinforcementCount,
+      contactId: journalInsights.contactId,
+    })
+    .from(journalInsights)
+    .where(
+      and(
+        eq(journalInsights.userId, userId),
+        eq(journalInsights.category, category)
+      )
+    )
+    .orderBy(desc(journalInsights.lastReinforcedAt))
+    .limit(100);
+
+  // Find a match — for relationship_dynamic, also check same contact
+  const match = existing.find((e) => {
+    if (category === "relationship_dynamic" && contactId && e.contactId !== contactId) {
+      return false;
+    }
+    return insightsAreSimilar(e.content, content);
+  });
+
+  if (!match) return false;
+
+  const newCount = match.reinforcementCount + 1;
+  const now = new Date();
+  const score = computeRelevanceScore(newCount, now, contactImportance);
+
+  // Reinforce: bump count, update timestamp, keep the longer/newer wording
+  const bestContent = content.length > match.content.length ? content : match.content;
+
+  await db
+    .update(journalInsights)
+    .set({
+      reinforcementCount: newCount,
+      lastReinforcedAt: now,
+      relevanceScore: score,
+      content: bestContent,
+      entryDate, // update to most recent entry date
+    })
+    .where(eq(journalInsights.id, match.id));
+
+  return true;
+}
+
 // ── Write to DB ────────────────────────────────────────────────────────
 
 async function writeExtractionToDb(
@@ -356,27 +447,47 @@ async function writeExtractionToDb(
     }
   }
 
-  // 2. Recurring themes → journal_insights
+  // Preload contact importance for relevance scoring
+  const allContactsWithImportance = await db
+    .select({ id: contacts.id, importance: contacts.importance })
+    .from(contacts)
+    .where(eq(contacts.userId, userId));
+  const contactImportanceMap = new Map(
+    allContactsWithImportance.map((c) => [c.id, c.importance])
+  );
+
+  // 2. Recurring themes → journal_insights (with reinforcement dedup)
   for (const theme of extraction.recurringThemes) {
-    await db.insert(journalInsights).values({
-      userId,
-      entryDate,
-      category: "recurring_theme",
-      content: theme,
-    });
+    const reinforced = await tryReinforceInsight(userId, "recurring_theme", theme, null, entryDate);
+    if (!reinforced) {
+      await db.insert(journalInsights).values({
+        userId,
+        entryDate,
+        category: "recurring_theme",
+        content: theme,
+        relevanceScore: computeRelevanceScore(1, new Date()),
+      });
+    }
     counts.insights++;
   }
 
-  // 3. Relationship dynamics → journal_insights (with contactId)
+  // 3. Relationship dynamics → journal_insights (with reinforcement dedup)
   for (const dynamic of extraction.relationshipDynamics) {
     const contactId = resolveContactId(dynamic.contactName, dynamic.contactId);
-    await db.insert(journalInsights).values({
-      userId,
-      entryDate,
-      category: "relationship_dynamic",
-      contactId,
-      content: dynamic.insight,
-    });
+    const importance = contactId ? contactImportanceMap.get(contactId) : undefined;
+    const reinforced = await tryReinforceInsight(
+      userId, "relationship_dynamic", dynamic.insight, contactId, entryDate, importance
+    );
+    if (!reinforced) {
+      await db.insert(journalInsights).values({
+        userId,
+        entryDate,
+        category: "relationship_dynamic",
+        contactId,
+        content: dynamic.insight,
+        relevanceScore: computeRelevanceScore(1, new Date(), importance),
+      });
+    }
     counts.insights++;
   }
 
@@ -406,18 +517,22 @@ async function writeExtractionToDb(
     counts.openLoops++;
   }
 
-  // 5. Personal reflections → journal_insights
+  // 5. Personal reflections → journal_insights (with reinforcement dedup)
   for (const reflection of extraction.personalReflections) {
-    await db.insert(journalInsights).values({
-      userId,
-      entryDate,
-      category: "personal_reflection",
-      content: reflection,
-    });
+    const reinforced = await tryReinforceInsight(userId, "personal_reflection", reflection, null, entryDate);
+    if (!reinforced) {
+      await db.insert(journalInsights).values({
+        userId,
+        entryDate,
+        category: "personal_reflection",
+        content: reflection,
+        relevanceScore: computeRelevanceScore(1, new Date()),
+      });
+    }
     counts.insights++;
   }
 
-  // 6. Places & experiences → journal_insights
+  // 6. Places & experiences → journal_insights (no dedup — places are unique events)
   for (const place of extraction.placesExperiences) {
     await db.insert(journalInsights).values({
       userId,

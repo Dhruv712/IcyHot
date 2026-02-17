@@ -179,6 +179,9 @@ export const journalInsights = pgTable("journal_insights", {
   category: text("category").notNull(), // "recurring_theme" | "relationship_dynamic" | "personal_reflection" | "place_experience"
   contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
   content: text("content").notNull(),
+  reinforcementCount: integer("reinforcement_count").default(1).notNull(),
+  lastReinforcedAt: timestamp("last_reinforced_at").defaultNow().notNull(),
+  relevanceScore: real("relevance_score").default(1.0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -234,3 +237,21 @@ export const journalNewPeople = pgTable("journal_new_people", {
   contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// ── Daily Briefings ──────────────────────────────────────────────────
+
+export const dailyBriefings = pgTable(
+  "daily_briefings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    briefingDate: date("briefing_date").notNull(),
+    content: text("content").notNull(), // JSON string of structured briefing
+    generatedAt: timestamp("generated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("daily_briefings_user_date").on(table.userId, table.briefingDate),
+  ]
+);

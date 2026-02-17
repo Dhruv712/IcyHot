@@ -8,6 +8,7 @@ import HealthScore from "./HealthScore";
 interface SidebarProps {
   healthScore: number;
   contactCount: number;
+  driftingCount: number;
   onAddPerson: () => void;
   onSyncCalendar: () => void;
   onSyncJournal: () => void;
@@ -58,6 +59,7 @@ const NAV_ITEMS = [
 export default function Sidebar({
   healthScore,
   contactCount,
+  driftingCount,
   onAddPerson,
   onSyncCalendar,
   onSyncJournal,
@@ -116,7 +118,14 @@ export default function Sidebar({
               {isActive && (
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[var(--amber)] rounded-r-full" />
               )}
-              <span className="flex-shrink-0">{item.icon}</span>
+              <span className="flex-shrink-0 relative">
+                {item.icon}
+                {item.href === "/" && driftingCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center bg-[var(--amber)] text-[var(--bg-base)] text-[10px] font-bold rounded-full px-1">
+                    {driftingCount}
+                  </span>
+                )}
+              </span>
               {!collapsed && (
                 <span className="text-sm font-medium">{item.label}</span>
               )}
