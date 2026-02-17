@@ -183,7 +183,7 @@ async function extractInsights(
     const LONG_ENTRY_THRESHOLD = 4000;
     const model =
       journalText.length >= LONG_ENTRY_THRESHOLD
-        ? "claude-haiku-4-20250514"
+        ? "claude-haiku-4-5-20251001"
         : "claude-sonnet-4-20250514";
     console.log(`[journal-extract] Using model=${model} for ${journalText.length} chars`);
 
