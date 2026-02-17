@@ -175,7 +175,10 @@ async function extractInsights(
       ? contactList.map((c) => `- "${c.name}" (id: "${c.id}")`).join("\n")
       : "(no contacts yet)";
 
-    const response = await client.messages.create({
+    // Use streaming to avoid Vercel gateway timeout on long entries.
+    // Non-streaming waits for the full response before resolving, which
+    // can exceed the ~25s gateway timeout for large journal entries.
+    const stream = client.messages.stream({
       model: "claude-sonnet-4-20250514",
       max_tokens: 8192,
       messages: [
@@ -250,6 +253,8 @@ Guidelines:
         },
       ],
     });
+
+    const response = await stream.finalMessage();
 
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
