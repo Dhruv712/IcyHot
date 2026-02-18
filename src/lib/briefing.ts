@@ -88,13 +88,14 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     getRecentInteractions(userId, 30),
     // Active open loops (not resolved, not snoozed past today)
     getActiveOpenLoops(userId, today),
-    // All contacts with importance + notes
+    // All contacts with importance + notes + bio
     db.select({
       id: contacts.id,
       name: contacts.name,
       importance: contacts.importance,
       relationshipType: contacts.relationshipType,
       notes: contacts.notes,
+      bio: contacts.bio,
     }).from(contacts).where(eq(contacts.userId, userId)),
     // Contact group memberships
     db.select({
@@ -207,6 +208,9 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
         contextParts.push(`- ${e.contactName} at ${e.eventTime}: "${e.eventSummary}"`);
         if (contact) {
           contextParts.push(`  Relationship: ${contact.relationshipType}, importance: ${contact.importance}/10`);
+          if (contact.bio) {
+            contextParts.push(`  Bio: ${contact.bio.slice(0, 300)}`);
+          }
         }
         contextParts.push(`  Total interactions on record: ${totalInteractions}${firstInteraction ? ` (first: ${firstInteraction})` : " (NO prior interactions — this may be a first meeting)"}`);
         if (contact?.notes) {
@@ -277,6 +281,9 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
         contextParts.push(`- ${t.contactName} (importance: ${t.importance}/10): ${t.daysSinceLastInteraction} days since last interaction`);
         if (contact) {
           contextParts.push(`  Relationship: ${contact.relationshipType}`);
+          if (contact.bio) {
+            contextParts.push(`  Bio: ${contact.bio.slice(0, 300)}`);
+          }
         }
         if (contact?.notes) {
           contextParts.push(`  Notes: ${contact.notes.slice(0, 200)}`);
@@ -515,7 +522,7 @@ async function getActiveOpenLoops(userId: string, today: string) {
 }
 
 function computeTemperatureAlerts(
-  allContacts: { id: string; name: string; importance: number; relationshipType: string; notes: string | null }[],
+  allContacts: { id: string; name: string; importance: number; relationshipType: string; notes: string | null; bio: string | null }[],
   recentInteractions: { contactId: string; occurredAt: Date }[]
 ): TemperatureAlert[] {
   const alerts: TemperatureAlert[] = [];

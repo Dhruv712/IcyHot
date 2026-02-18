@@ -102,6 +102,7 @@ export async function GET() {
       name: contact.name,
       email: contact.email ?? null,
       relationshipType: contact.relationshipType,
+      bio: contact.bio ?? null,
       importance: contact.importance,
       temperature,
       color,

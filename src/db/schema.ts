@@ -69,6 +69,7 @@ export const contacts = pgTable("contacts", {
     .notNull(),
   importance: integer("importance").default(5).notNull(),
   notes: text("notes"),
+  bio: text("bio"), // Who this person is to the user — editable, can be auto-inferred from journal
   // Groups managed via contactGroups join table
   decayRateOverride: real("decay_rate_override"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

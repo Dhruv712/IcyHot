@@ -6,7 +6,7 @@ import { temperatureLabel } from "@/lib/temperature";
 import { formatDate } from "@/lib/utils";
 import { RELATIONSHIP_LABELS } from "@/lib/constants";
 import { useContactInteractions, useLogInteraction } from "@/hooks/useInteractions";
-import { useDeleteContact, useUpdateContact } from "@/hooks/useContacts";
+import { useDeleteContact, useUpdateContact, useGenerateBio } from "@/hooks/useContacts";
 import { useGroups, useCreateGroup } from "@/hooks/useGroups";
 import { useContactCalendarEvents, useConfirmMatch } from "@/hooks/useCalendar";
 import type { ContactCalendarEvent } from "@/hooks/useCalendar";
@@ -122,6 +122,8 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
   const [nameDraft, setNameDraft] = useState(node.name);
   const [relationshipDraft, setRelationshipDraft] = useState(node.relationshipType);
   const [importanceDraft, setImportanceDraft] = useState(node.importance);
+  const [editingBio, setEditingBio] = useState(false);
+  const [bioDraft, setBioDraft] = useState(node.bio || "");
 
   // Reset drafts when node changes
   useEffect(() => {
@@ -129,14 +131,17 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
     setRelationshipDraft(node.relationshipType);
     setImportanceDraft(node.importance);
     setEmailDraft(node.email || "");
+    setBioDraft(node.bio || "");
     setEditing(false);
     setEditingEmail(false);
-  }, [node.id, node.name, node.relationshipType, node.importance, node.email]);
+    setEditingBio(false);
+  }, [node.id, node.name, node.relationshipType, node.importance, node.email, node.bio]);
 
   const { data: interactions } = useContactInteractions(node.id);
   const logInteraction = useLogInteraction();
   const deleteContact = useDeleteContact();
   const updateContact = useUpdateContact();
+  const generateBio = useGenerateBio();
   const { data: groups } = useGroups();
   const createGroup = useCreateGroup();
   const { data: calendarEvents } = useContactCalendarEvents(node.id);
@@ -271,6 +276,67 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
                   if (e.key === "Escape") {
                     setEmailDraft(node.email || "");
                     setEditingEmail(false);
+                  }
+                }}
+              />
+            )}
+
+            {/* Bio */}
+            {!editingBio ? (
+              <div className="flex items-start gap-1 mt-1">
+                <button
+                  onClick={() => {
+                    setBioDraft(node.bio || "");
+                    setEditingBio(true);
+                  }}
+                  className={`text-xs transition-colors text-left leading-relaxed flex-1 ${
+                    node.bio
+                      ? "text-[var(--text-secondary)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  {node.bio || "+ Add bio"}
+                </button>
+                <button
+                  onClick={() => {
+                    generateBio.mutate(node.id, {
+                      onSuccess: (data) => {
+                        if (data.bio) {
+                          setBioDraft(data.bio);
+                        }
+                      },
+                    });
+                  }}
+                  disabled={generateBio.isPending}
+                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--amber)] transition-colors flex-shrink-0 mt-0.5"
+                  title="Generate bio from journal context"
+                >
+                  {generateBio.isPending ? "..." : "\u2728"}
+                </button>
+              </div>
+            ) : (
+              <textarea
+                value={bioDraft}
+                onChange={(e) => setBioDraft(e.target.value)}
+                placeholder="Who is this person to you? e.g. College roommate, works at Stripe, met at YC..."
+                className="mt-1 w-full bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-lg px-2 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--amber)] resize-none leading-relaxed"
+                rows={2}
+                autoFocus
+                onBlur={() => {
+                  const trimmed = bioDraft.trim();
+                  if (trimmed !== (node.bio || "")) {
+                    updateContact.mutate({ id: node.id, bio: trimmed || null });
+                  }
+                  setEditingBio(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    (e.target as HTMLTextAreaElement).blur();
+                  }
+                  if (e.key === "Escape") {
+                    setBioDraft(node.bio || "");
+                    setEditingBio(false);
                   }
                 }}
               />

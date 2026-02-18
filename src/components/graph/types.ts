@@ -17,6 +17,7 @@ export interface GraphNode extends SimulationNodeDatum {
   nudgeScore: number;
   interactionCount: number;
   relationshipType: string;
+  bio: string | null;
   hasCalendarEvents: boolean;
 }
 

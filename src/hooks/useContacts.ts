@@ -13,6 +13,7 @@ interface CreateContactInput {
 
 interface UpdateContactInput extends Partial<CreateContactInput> {
   email?: string;
+  bio?: string | null;
   groupIds?: string[];
   decayRateOverride?: number | null;
 }
@@ -48,6 +49,23 @@ export function useUpdateContact() {
       });
       if (!res.ok) throw new Error("Failed to update contact");
       return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["graph"] });
+    },
+  });
+}
+
+export function useGenerateBio() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/contacts/${id}/bio`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Failed to generate bio");
+      return res.json() as Promise<{ bio: string | null; message?: string }>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["graph"] });

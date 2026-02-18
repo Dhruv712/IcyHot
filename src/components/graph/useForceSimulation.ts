@@ -150,6 +150,7 @@ export function useForceSimulation({
       nudgeScore: 0,
       interactionCount: 0,
       relationshipType: "other",
+      bio: null,
       hasCalendarEvents: false,
       x: cx,
       y: cy,
