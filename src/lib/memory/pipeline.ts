@@ -19,15 +19,19 @@ export interface MemoryProcessResult {
   filesProcessed: number;
   memoriesCreated: number;
   memoriesReinforced: number;
+  remaining: number;
 }
 
 export async function processMemories(
-  userId: string
+  userId: string,
+  options?: { limit?: number }
 ): Promise<MemoryProcessResult> {
+  const maxFiles = options?.limit ?? Infinity;
   const result: MemoryProcessResult = {
     filesProcessed: 0,
     memoriesCreated: 0,
     memoriesReinforced: 0,
+    remaining: 0,
   };
 
   // 1. Get sync state — which files have already been processed?
@@ -60,8 +64,9 @@ export async function processMemories(
     .from(contacts)
     .where(eq(contacts.userId, userId));
 
-  // 4. Process each new file
+  // 4. Process each new file (up to limit)
   for (const file of newFiles) {
+    if (result.filesProcessed >= maxFiles) break;
     const entryDate = parseJournalDate(file.name);
     if (!entryDate) {
       console.warn(`[memory-pipeline] Skipping "${file.name}" — can't parse date`);
@@ -112,7 +117,10 @@ export async function processMemories(
     }
   }
 
-  // 5. Update sync state
+  // 5. Count remaining unprocessed files
+  result.remaining = newFiles.filter((f) => !processedSet.has(f.name)).length;
+
+  // 6. Update sync state
   const newProcessedFiles = JSON.stringify([...processedSet]);
   if (syncState) {
     await db
