@@ -8,6 +8,8 @@ import {
   calendarEvents,
   calendarEventContacts,
   dailyBriefings,
+  groups,
+  contactGroups,
 } from "@/db/schema";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 
@@ -76,6 +78,7 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     recentInteractions,
     activeLoops,
     allContacts,
+    contactGroupMemberships,
   ] = await Promise.all([
     // Today's calendar events with matched contacts
     getTodayCalendarEvents(userId, today),
@@ -85,14 +88,31 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     getRecentInteractions(userId, 30),
     // Active open loops (not resolved, not snoozed past today)
     getActiveOpenLoops(userId, today),
-    // All contacts with importance
+    // All contacts with importance + notes
     db.select({
       id: contacts.id,
       name: contacts.name,
       importance: contacts.importance,
       relationshipType: contacts.relationshipType,
+      notes: contacts.notes,
     }).from(contacts).where(eq(contacts.userId, userId)),
+    // Contact group memberships
+    db.select({
+      contactId: contactGroups.contactId,
+      groupName: groups.name,
+    }).from(contactGroups)
+      .innerJoin(groups, eq(groups.id, contactGroups.groupId))
+      .innerJoin(contacts, eq(contacts.id, contactGroups.contactId))
+      .where(eq(contacts.userId, userId)),
   ]);
+
+  // Build group lookup map
+  const groupsByContact = new Map<string, string[]>();
+  for (const m of contactGroupMemberships) {
+    const existing = groupsByContact.get(m.contactId) || [];
+    existing.push(m.groupName);
+    groupsByContact.set(m.contactId, existing);
+  }
 
   // Compute temperature alerts (important contacts going cold)
   const temperatureAlerts = computeTemperatureAlerts(allContacts, recentInteractions);
@@ -164,8 +184,40 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
           ? allContactInteractions[allContactInteractions.length - 1].occurredAt.toISOString().slice(0, 10)
           : null;
 
+        const contact = allContacts.find((c) => c.id === e.contactId);
+        const contactGroupNames = groupsByContact.get(e.contactId) || [];
+
+        // Sentiment trend analysis
+        const sentimentCounts = { great: 0, good: 0, neutral: 0, awkward: 0 };
+        for (const i of allContactInteractions) {
+          if (i.sentiment && i.sentiment in sentimentCounts) {
+            sentimentCounts[i.sentiment as keyof typeof sentimentCounts]++;
+          }
+        }
+        const totalSentiments = Object.values(sentimentCounts).reduce((a, b) => a + b, 0);
+        let sentimentTrend = "";
+        if (totalSentiments >= 2) {
+          const positiveRatio = (sentimentCounts.great + sentimentCounts.good) / totalSentiments;
+          const negativeRatio = sentimentCounts.awkward / totalSentiments;
+          if (positiveRatio >= 0.6) sentimentTrend = "mostly positive";
+          else if (negativeRatio >= 0.4) sentimentTrend = "often awkward";
+          else sentimentTrend = "mixed";
+        }
+
         contextParts.push(`- ${e.contactName} at ${e.eventTime}: "${e.eventSummary}"`);
+        if (contact) {
+          contextParts.push(`  Relationship: ${contact.relationshipType}, importance: ${contact.importance}/10`);
+        }
         contextParts.push(`  Total interactions on record: ${totalInteractions}${firstInteraction ? ` (first: ${firstInteraction})` : " (NO prior interactions — this may be a first meeting)"}`);
+        if (contact?.notes) {
+          contextParts.push(`  Notes: ${contact.notes.slice(0, 200)}`);
+        }
+        if (contactGroupNames.length > 0) {
+          contextParts.push(`  Groups: ${contactGroupNames.join(", ")}`);
+        }
+        if (sentimentTrend) {
+          contextParts.push(`  Sentiment trend: ${sentimentTrend} (across ${totalSentiments} interactions)`);
+        }
         if (contactInteractions.length > 0) {
           contextParts.push(`  Recent interactions: ${contactInteractions.map((i) => `[${i.sentiment || "neutral"}] ${i.note?.slice(0, 100) || "no notes"}`).join("; ")}`);
         }
@@ -175,6 +227,17 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
         if (contactInsights.length > 0) {
           contextParts.push(`  Dynamics: ${contactInsights.map((i) => i.content.slice(0, 100)).join("; ")}`);
         }
+      }
+    }
+
+    // Personal reflections (general self-awareness, not contact-specific)
+    const personalReflections = recentInsights
+      .filter((i) => i.category === "personal_reflection")
+      .slice(0, 2);
+    if (personalReflections.length > 0) {
+      contextParts.push("\nRECENT PERSONAL REFLECTIONS:");
+      for (const r of personalReflections) {
+        contextParts.push(`  [${r.entryDate}] ${r.content.slice(0, 150)}`);
       }
     }
 
@@ -221,11 +284,13 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
 
     const stream = client.messages.stream({
       model: "claude-opus-4-20250514",
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [
         {
           role: "user",
-          content: `You are Dhruv's personal relationship intelligence system. Generate a daily briefing for ${today}. Write in second person ("you"). Be warm but concise — each piece should be 1-2 sentences max.
+          content: `You are Dhruv's personal relationship intelligence system. Generate a daily briefing for ${today}. Write in second person ("you"). Be warm, thoughtful, and contextually rich.
+
+You have rich context including relationship types, personal notes, group memberships, sentiment trends, and personal reflections. Use these to create nuanced, deeply contextual meeting prep and a narrative summary that weaves the day together.
 
 CRITICAL: Pay close attention to the "Total interactions on record" for each contact. If a contact has 0 or 1 total interactions, this is likely a new or very recent connection — do NOT write as if Dhruv already has an established relationship with them. Instead, frame the briefing around getting to know them, first impressions, or preparation for an initial meeting. Only reference shared history if multiple prior interactions exist.
 
@@ -234,13 +299,13 @@ ${contextStr}
 Return ONLY valid JSON:
 {
   "todayContext": [
-    { "contactId": "...", "contactName": "...", "eventSummary": "...", "eventTime": "...", "briefing": "1-2 sentence prep note for this meeting — what to remember, what to bring up, emotional context. For new contacts (0-1 prior interactions), focus on first impressions and getting to know them." }
+    { "contactId": "...", "contactName": "...", "eventSummary": "...", "eventTime": "...", "briefing": "2-3 sentence prep note for this meeting. Weave in relationship type, group context, sentiment trends, personal notes, and relevant personal reflections. For new contacts (0-1 prior interactions), focus on first impressions and getting to know them. For established contacts, reference shared history and emotional context." }
   ],
   "relationshipArc": ${arcCandidate ? `{ "contactId": "${arcCandidate.contactId}", "contactName": "${arcCandidate.contactName}", "arc": "2-3 sentence narrative of how this relationship has evolved recently" }` : "null"},
   "temperatureAlerts": [
     { "contactId": "...", "contactName": "...", "importance": N, "daysSinceLastInteraction": N, "suggestion": "1 sentence natural suggestion for reconnecting" }
   ],
-  "summary": "1-2 sentence overall summary of the day ahead — what matters most"
+  "summary": "3-4 sentence narrative that weaves together today's meetings, relationship themes, cooling contacts, and any open loops into a cohesive picture of the day ahead. If personal reflections are relevant, thread them in naturally. Set the tone — what kind of day is this?"
 }
 
 Only include contacts that appear in the context above. Keep it genuine and natural.`,
@@ -392,7 +457,7 @@ async function getActiveOpenLoops(userId: string, today: string) {
 }
 
 function computeTemperatureAlerts(
-  allContacts: { id: string; name: string; importance: number; relationshipType: string }[],
+  allContacts: { id: string; name: string; importance: number; relationshipType: string; notes: string | null }[],
   recentInteractions: { contactId: string; occurredAt: Date }[]
 ): TemperatureAlert[] {
   const alerts: TemperatureAlert[] = [];

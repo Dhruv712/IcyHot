@@ -56,6 +56,19 @@ export function drawNodes(
       ctx.fill();
     }
 
+    // Drifting pulse for important-but-cold nodes
+    if (node.importance >= 7 && node.temperature < 0.3 && node.id !== "me") {
+      const driftPulse = Math.sin(time * 0.00314 + idx * 0.5) * 0.5 + 0.5;
+      const ringRadius = node.nodeRadius + 4 + driftPulse * 6;
+      const ringAlpha = 0.15 + driftPulse * 0.35;
+
+      ctx.strokeStyle = `rgba(245, 158, 11, ${ringAlpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     // "Me" node special rendering
     if (node.id === "me") {
       // Pulsing glow

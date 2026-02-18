@@ -3,7 +3,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import { drawNodes } from "./nodeRenderer";
 import type { GraphNode } from "./types";
-import { getOrbitRadii } from "@/lib/physics";
+import { getOrbitRadii, temperatureBand } from "@/lib/physics";
 
 interface Star {
   x: number;
@@ -170,6 +170,16 @@ export function useCanvasRenderer({
     const orbitRadii = getOrbitRadii(width, height);
     const ringPulse = Math.sin(now * 0.0008) * 0.01 + 0.03;
     const bandLabels = ["Hot", "Warm", "Cool", "Cold"];
+
+    // Count drifting nodes per orbital band
+    const driftingPerBand = [0, 0, 0, 0];
+    for (const node of nodesRef.current) {
+      if (node.id === "me") continue;
+      if (node.importance >= 7 && node.temperature < 0.3) {
+        driftingPerBand[temperatureBand(node.temperature)]++;
+      }
+    }
+
     if (isFocused) ctx.globalAlpha = 0.3;
     for (let i = 0; i < orbitRadii.length; i++) {
       const r = orbitRadii[i];
@@ -187,7 +197,11 @@ export function useCanvasRenderer({
         ctx.font = "9px Inter, system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
-        ctx.fillText(bandLabels[i], centerX, centerY - r - 4);
+        let label = bandLabels[i];
+        if (driftingPerBand[i] > 0) {
+          label += ` · ${driftingPerBand[i]} drifting`;
+        }
+        ctx.fillText(label, centerX, centerY - r - 4);
       }
     }
     ctx.globalAlpha = 1;
