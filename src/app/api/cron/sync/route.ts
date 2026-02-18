@@ -9,6 +9,7 @@ import { sendPushToUser } from "@/lib/push";
 import { snapshotHealthScore } from "@/lib/health";
 import { generateWeeklyRetro } from "@/lib/retro";
 import { processMemories } from "@/lib/memory/pipeline";
+import { consolidateMemories } from "@/lib/memory/consolidate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
     journal: { success: boolean; error?: string };
     calendar: { success: boolean; error?: string };
     memory: { success: boolean; error?: string };
+    consolidation: { success: boolean; error?: string };
     briefing: { success: boolean; error?: string };
     push: { success: boolean; sent?: number; error?: string };
     healthSnapshot: { success: boolean; error?: string };
@@ -39,6 +41,7 @@ export async function GET(request: NextRequest) {
       journal: { success: false },
       calendar: { success: false },
       memory: { success: false },
+      consolidation: { success: false },
       briefing: { success: false },
       push: { success: false },
       healthSnapshot: { success: false },
@@ -73,6 +76,18 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error(`[cron] Memory processing failed for ${user.id}:`, error);
       result.memory = {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+
+    // Memory consolidation — discover connections + implications (failures don't block briefing)
+    try {
+      await consolidateMemories(user.id);
+      result.consolidation = { success: true };
+    } catch (error) {
+      console.error(`[cron] Memory consolidation failed for ${user.id}:`, error);
+      result.consolidation = {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };

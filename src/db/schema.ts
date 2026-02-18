@@ -347,6 +347,7 @@ export const memoryConnections = pgTable(
     memoryBId: uuid("memory_b_id")
       .references(() => memories.id, { onDelete: "cascade" })
       .notNull(),
+    connectionType: text("connection_type"), // "causal" | "thematic" | "contradiction" | "pattern" | "temporal_sequence" | "cross_domain" | "sensory" | "deviation" | "escalation"
     weight: real("weight").default(0.5).notNull(),
     reason: text("reason"), // Why these memories are connected
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -364,6 +365,8 @@ export const memoryImplications = pgTable("memory_implications", {
     .notNull(),
   content: text("content").notNull(),
   embedding: vector("embedding", { dimensions: 1024 }),
+  implicationType: text("implication_type"), // "predictive" | "emotional" | "relational" | "identity" | "behavioral" | "actionable" | "absence" | "trajectory" | "meta_cognitive" | "retrograde" | "counterfactual"
+  implicationOrder: integer("implication_order").default(1), // 1st, 2nd, or 3rd order
   sourceMemoryIds: text("source_memory_ids").notNull(), // JSON array of memory UUIDs
   strength: real("strength").default(1.0).notNull(),
   lastReinforcedAt: timestamp("last_reinforced_at").defaultNow().notNull(),
