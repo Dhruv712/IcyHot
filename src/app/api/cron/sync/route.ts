@@ -4,6 +4,9 @@ import { users } from "@/db/schema";
 import { syncJournalEntries } from "@/lib/journal";
 import { syncCalendarEvents } from "@/lib/calendar";
 import { generateDailyBriefing } from "@/lib/briefing";
+import { sendPushToUser } from "@/lib/push";
+import { snapshotHealthScore } from "@/lib/health";
+import { generateWeeklyRetro } from "@/lib/retro";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -15,20 +18,26 @@ export async function GET(request: NextRequest) {
   }
 
   const allUsers = await db.select({ id: users.id }).from(users);
+  const isSunday = new Date().getUTCDay() === 0;
 
   const results: Array<{
     userId: string;
     journal: { success: boolean; error?: string };
     calendar: { success: boolean; error?: string };
     briefing: { success: boolean; error?: string };
+    push: { success: boolean; sent?: number; error?: string };
+    healthSnapshot: { success: boolean; error?: string };
+    retro?: { success: boolean; error?: string };
   }> = [];
 
   for (const user of allUsers) {
-    const result = {
+    const result: (typeof results)[0] = {
       userId: user.id,
-      journal: { success: false } as { success: boolean; error?: string },
-      calendar: { success: false } as { success: boolean; error?: string },
-      briefing: { success: false } as { success: boolean; error?: string },
+      journal: { success: false },
+      calendar: { success: false },
+      briefing: { success: false },
+      push: { success: false },
+      healthSnapshot: { success: false },
     };
 
     try {
@@ -55,14 +64,72 @@ export async function GET(request: NextRequest) {
 
     // Generate daily briefing after sync completes
     try {
-      await generateDailyBriefing(user.id);
+      const briefing = await generateDailyBriefing(user.id);
       result.briefing = { success: true };
+
+      // Send push notification with briefing summary
+      if (briefing?.summary) {
+        try {
+          const pushResult = await sendPushToUser(user.id, {
+            title: "Your morning briefing",
+            body: briefing.summary.slice(0, 200),
+            url: "/dashboard",
+          });
+          result.push = { success: true, sent: pushResult.sent };
+        } catch (pushError) {
+          console.error(`[cron] Push failed for ${user.id}:`, pushError);
+          result.push = {
+            success: false,
+            error: pushError instanceof Error ? pushError.message : "Unknown error",
+          };
+        }
+      }
     } catch (error) {
       console.error(`[cron] Briefing generation failed for ${user.id}:`, error);
       result.briefing = {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
+    }
+
+    // Daily health score snapshot
+    try {
+      await snapshotHealthScore(user.id);
+      result.healthSnapshot = { success: true };
+    } catch (error) {
+      console.error(`[cron] Health snapshot failed for ${user.id}:`, error);
+      result.healthSnapshot = {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+
+    // Sunday: generate weekly retrospective
+    if (isSunday) {
+      result.retro = { success: false };
+      try {
+        const retro = await generateWeeklyRetro(user.id);
+        result.retro = { success: true };
+
+        if (retro?.weekSummary) {
+          try {
+            await sendPushToUser(user.id, {
+              title: "Your weekly retro is ready",
+              body: retro.weekSummary.slice(0, 200),
+              url: "/dashboard",
+              tag: "icyhot-weekly-retro",
+            });
+          } catch (pushError) {
+            console.error(`[cron] Retro push failed for ${user.id}:`, pushError);
+          }
+        }
+      } catch (error) {
+        console.error(`[cron] Weekly retro failed for ${user.id}:`, error);
+        result.retro = {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
     }
 
     results.push(result);

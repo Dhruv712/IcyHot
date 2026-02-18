@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { eq, and, gte } from "drizzle-orm";
 import { computeTemperature, temperatureToColor } from "@/lib/temperature";
 import { computeNodeProperties, nudgeScore } from "@/lib/physics";
+import { computeHealthScore } from "@/lib/health";
 
 export async function GET() {
   const session = await auth();
@@ -127,22 +128,7 @@ export async function GET() {
   });
 
   // Compute network health score (0-100)
-  let healthScore = 0;
-  if (nodes.length > 0) {
-    const totalImportance = nodes.reduce((sum, n) => sum + n.importance, 0);
-    const weightedTemp = nodes.reduce(
-      (sum, n) => sum + n.importance * n.temperature,
-      0
-    );
-    healthScore = totalImportance > 0
-      ? Math.round((weightedTemp / totalImportance) * 100)
-      : 0;
-    // Penalize for neglected important contacts (temp < 0.1, importance >= 7)
-    const neglected = nodes.filter(
-      (n) => n.temperature < 0.1 && n.importance >= 7
-    ).length;
-    healthScore = Math.max(0, healthScore - neglected * 5);
-  }
+  const healthScore = computeHealthScore(nodes);
 
   return NextResponse.json({
     nodes,

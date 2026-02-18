@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useGraphData } from "@/hooks/useGraphData";
 import { useCalendarStatus } from "@/hooks/useCalendar";
+import Tabs from "@/components/ui/Tabs";
 import BriefingView from "@/components/dashboard/BriefingView";
+import RetroView from "@/components/dashboard/RetroView";
 import HealthCard from "@/components/dashboard/HealthCard";
 import StatsRow from "@/components/dashboard/StatsRow";
 // ReachOutCard functionality is now integrated into BriefingView
@@ -12,10 +14,16 @@ import InsightCard from "@/components/dashboard/InsightCard";
 import NewPeopleCard from "@/components/dashboard/NewPeopleCard";
 import UnmatchedCard from "@/components/dashboard/UnmatchedCard";
 
+const DASHBOARD_TABS = [
+  { key: "today", label: "Today", icon: "☀️" },
+  { key: "week", label: "This Week", icon: "📊" },
+];
+
 export default function DashboardPage() {
   const { data: graphData, isLoading } = useGraphData();
   const { data: calendarStatus } = useCalendarStatus();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("today");
 
   const contactNodes = graphData?.nodes ?? [];
 
@@ -29,8 +37,13 @@ export default function DashboardPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      {/* Morning Briefing — primary view */}
-      <BriefingView />
+      {/* Tab toggle */}
+      <div className="max-w-[640px] mx-auto px-6 pt-4">
+        <Tabs tabs={DASHBOARD_TABS} activeKey={activeTab} onChange={setActiveTab} />
+      </div>
+
+      {/* Tab content */}
+      {activeTab === "today" ? <BriefingView /> : <RetroView />}
 
       {/* Zen divider before details */}
       <div className="max-w-[640px] mx-auto px-6 py-2">

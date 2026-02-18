@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import HealthScore from "./HealthScore";
+import NotificationToggle from "./NotificationToggle";
 
 interface SidebarProps {
   healthScore: number;
@@ -189,6 +190,9 @@ export default function Sidebar({
             {!collapsed && <span className="text-sm">Journal</span>}
           </button>
         )}
+
+        {/* Notifications */}
+        <NotificationToggle collapsed={collapsed} />
       </div>
 
       {/* Health Score */}

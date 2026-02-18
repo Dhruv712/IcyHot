@@ -256,3 +256,58 @@ export const dailyBriefings = pgTable(
     uniqueIndex("daily_briefings_user_date").on(table.userId, table.briefingDate),
   ]
 );
+
+// ── Push Notifications ──────────────────────────────────────────────
+
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("push_subscriptions_user_endpoint").on(table.userId, table.endpoint),
+  ]
+);
+
+// ── Weekly Retrospectives ───────────────────────────────────────────
+
+export const weeklyRetros = pgTable(
+  "weekly_retros",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    weekStart: date("week_start").notNull(),
+    content: text("content").notNull(), // JSON string of WeeklyRetroContent
+    generatedAt: timestamp("generated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("weekly_retros_user_week").on(table.userId, table.weekStart),
+  ]
+);
+
+// ── Health Score Snapshots ──────────────────────────────────────────
+
+export const healthScoreSnapshots = pgTable(
+  "health_score_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    snapshotDate: date("snapshot_date").notNull(),
+    score: integer("score").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("health_score_snapshots_user_date").on(table.userId, table.snapshotDate),
+  ]
+);

@@ -15,6 +15,13 @@
       "when": 1771376121674,
       "tag": "0001_add-contact-bio",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771380919718,
+      "tag": "0002_add-push-retro-health",
+      "breakpoints": true
     }
   ]
 }
