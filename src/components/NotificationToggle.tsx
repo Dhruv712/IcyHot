@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -13,6 +13,16 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+/** Race a promise against a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 interface NotificationToggleProps {
   collapsed?: boolean;
 }
@@ -21,6 +31,14 @@ export default function NotificationToggle({ collapsed = false }: NotificationTo
   const [supported, setSupported] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Auto-clear error after 4 seconds
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 4000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   useEffect(() => {
     const check = async () => {
@@ -33,11 +51,18 @@ export default function NotificationToggle({ collapsed = false }: NotificationTo
       setSupported(true);
 
       try {
-        const registration = await navigator.serviceWorker.ready;
+        // Register SW if not already — makes sure `ready` will resolve
+        await navigator.serviceWorker.register("/sw.js");
+        const registration = await withTimeout(
+          navigator.serviceWorker.ready,
+          5000,
+          "Service worker ready"
+        );
         const subscription = await registration.pushManager.getSubscription();
         setEnabled(!!subscription);
-      } catch {
-        // Permission denied or other error
+      } catch (err) {
+        console.warn("[push] Init check failed:", err);
+        // SW not working — still show toggle, user can retry on click
       }
       setLoading(false);
     };
@@ -45,12 +70,19 @@ export default function NotificationToggle({ collapsed = false }: NotificationTo
     check();
   }, []);
 
-  const toggle = async () => {
+  const toggle = useCallback(async () => {
     if (loading) return;
     setLoading(true);
+    setError(null);
 
     try {
-      const registration = await navigator.serviceWorker.ready;
+      // Ensure SW is registered before awaiting ready
+      await navigator.serviceWorker.register("/sw.js");
+      const registration = await withTimeout(
+        navigator.serviceWorker.ready,
+        5000,
+        "Service worker ready"
+      );
 
       if (enabled) {
         // Unsubscribe
@@ -69,13 +101,15 @@ export default function NotificationToggle({ collapsed = false }: NotificationTo
         // Subscribe
         const permission = await Notification.requestPermission();
         if (permission !== "granted") {
+          setError("Permission denied");
           setLoading(false);
           return;
         }
 
         const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
         if (!vapidKey) {
-          console.error("[push] VAPID public key not found");
+          console.error("[push] VAPID public key not found in env");
+          setError("Push not configured");
           setLoading(false);
           return;
         }
@@ -86,7 +120,7 @@ export default function NotificationToggle({ collapsed = false }: NotificationTo
         });
 
         const json = subscription.toJSON();
-        await fetch("/api/push/subscribe", {
+        const res = await fetch("/api/push/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -95,51 +129,69 @@ export default function NotificationToggle({ collapsed = false }: NotificationTo
           }),
         });
 
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Subscribe failed (${res.status})`);
+        }
+
         setEnabled(true);
       }
-    } catch (error) {
-      console.error("[push] Toggle failed:", error);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error("[push] Toggle failed:", msg, err);
+      setError(msg);
     }
 
     setLoading(false);
-  };
+  }, [loading, enabled]);
 
   if (!supported) return null;
 
   return (
-    <button
-      onClick={toggle}
-      disabled={loading}
-      className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-colors w-full disabled:opacity-50 ${
-        collapsed ? "justify-center" : ""
-      } ${
-        enabled
-          ? "text-[var(--amber)] hover:bg-[var(--amber-ghost-bg)]"
-          : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
-      }`}
-      title={collapsed ? (enabled ? "Notifications on" : "Notifications off") : undefined}
-    >
-      <span className="text-base flex-shrink-0">
-        {enabled ? "\uD83D\uDD14" : "\uD83D\uDD15"}
-      </span>
-      {!collapsed && (
-        <span className="text-sm flex-1 text-left">
-          {loading ? "..." : enabled ? "Notifications on" : "Notifications"}
+    <div>
+      <button
+        onClick={toggle}
+        disabled={loading}
+        className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-colors w-full disabled:opacity-50 ${
+          collapsed ? "justify-center" : ""
+        } ${
+          enabled
+            ? "text-[var(--amber)] hover:bg-[var(--amber-ghost-bg)]"
+            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
+        }`}
+        title={
+          collapsed
+            ? enabled
+              ? "Notifications on"
+              : "Notifications off"
+            : error || undefined
+        }
+      >
+        <span className="text-base flex-shrink-0">
+          {enabled ? "\uD83D\uDD14" : "\uD83D\uDD15"}
         </span>
-      )}
-      {!collapsed && (
-        <span
-          className={`w-8 h-4 rounded-full relative transition-colors ${
-            enabled ? "bg-[var(--amber)]" : "bg-[var(--border-medium)]"
-          }`}
-        >
+        {!collapsed && (
+          <span className="text-sm flex-1 text-left">
+            {loading ? "..." : enabled ? "Notifications on" : "Notifications"}
+          </span>
+        )}
+        {!collapsed && (
           <span
-            className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
-              enabled ? "translate-x-4" : "translate-x-0.5"
+            className={`w-8 h-4 rounded-full relative transition-colors ${
+              enabled ? "bg-[var(--amber)]" : "bg-[var(--border-medium)]"
             }`}
-          />
-        </span>
+          >
+            <span
+              className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                enabled ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </span>
+        )}
+      </button>
+      {!collapsed && error && (
+        <p className="text-[11px] text-[var(--danger)] px-3 mt-0.5">{error}</p>
       )}
-    </button>
+    </div>
   );
 }
