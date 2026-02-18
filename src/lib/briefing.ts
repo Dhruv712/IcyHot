@@ -233,11 +233,34 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     // Personal reflections (general self-awareness, not contact-specific)
     const personalReflections = recentInsights
       .filter((i) => i.category === "personal_reflection")
-      .slice(0, 2);
+      .slice(0, 3);
     if (personalReflections.length > 0) {
       contextParts.push("\nRECENT PERSONAL REFLECTIONS:");
       for (const r of personalReflections) {
         contextParts.push(`  [${r.entryDate}] ${r.content.slice(0, 150)}`);
+      }
+    }
+
+    // Recurring themes from journal (patterns observed multiple times)
+    const recurringThemes = recentInsights
+      .filter((i) => i.category === "recurring_theme" && i.reinforcementCount >= 1)
+      .slice(0, 4);
+    if (recurringThemes.length > 0) {
+      contextParts.push("\nRECURRING THEMES FROM JOURNAL:");
+      for (const t of recurringThemes) {
+        const contactName = t.contactId
+          ? allContacts.find((c) => c.id === t.contactId)?.name
+          : null;
+        contextParts.push(`  [observed ${t.reinforcementCount}×${contactName ? `, about ${contactName}` : ""}] ${t.content.slice(0, 150)}`);
+      }
+    }
+
+    // General open loops (not tied to a specific contact)
+    const generalLoops = activeLoops.filter((l) => !l.contactId);
+    if (generalLoops.length > 0) {
+      contextParts.push("\nGENERAL OPEN LOOPS (not tied to a specific person):");
+      for (const l of generalLoops.slice(0, 5)) {
+        contextParts.push(`  [${l.entryDate}] ${l.content}`);
       }
     }
 
@@ -310,12 +333,13 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
       messages: [
         {
           role: "user",
-          content: `You are Dhruv's personal relationship manager. Generate a daily briefing for ${today}. Write in second person ("you").
+          content: `You are Dhruv's personal relationship manager and life coach. Generate a daily briefing for ${today}. Write in second person ("you").
 
 TONE RULES — follow these strictly:
 - Be direct and specific. Never hedge with "perhaps", "consider", "might be an opportunity", "could be a good time to".
 - Every suggestion must be a concrete action: "Text Sarah about X", "Ask John how Y went", "Send Amy the link to Z".
-- Reference specific details from the context (last interaction topics, open loops, notes). Don't be generic.
+– Reflections are allowed, even if they don't lead to concrete actions, but only if they're extremely insightful and expose Dhruv to realizations he wouldn't have otherwise had.
+- Reference specific details from the context (last interaction topics, open loops, notes). Don't be generic. However, don't force it – for example, if Dhruv got a haircut with someone once, don't latch onto that and suggest getting haircuts again... that's not something people do.
 - If you don't have enough context to say something specific, say less rather than filling space with platitudes.
 - Never use therapy-speak or horoscope language. No "threads in your life's tapestry" or "invites reflection."
 
@@ -324,7 +348,7 @@ FAMILIARITY RULES:
 - Only reference specific past events if they appear in the context data.
 
 ${todayEvents.length === 0 ? `NO-MEETING DAY RULES:
-- This is an open day. The cooling contacts ARE the main event — treat each one with the same depth as a meeting prep.
+- This is an open day. The reflections on recent life context and the cooling contacts ARE the main events — treat each cooling contact with the same depth as a meeting prep.
 - For each cooling contact, give a specific outreach suggestion: what to say, how to reach out (text, call, grab coffee), and what NOT to bring up if relevant.
 - The summary should read like a short to-do list: who to reach out to, in priority order, with one reason why for each.
 ` : ""}
