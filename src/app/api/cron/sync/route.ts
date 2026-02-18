@@ -8,6 +8,7 @@ import { generateDailyBriefing } from "@/lib/briefing";
 import { sendPushToUser } from "@/lib/push";
 import { snapshotHealthScore } from "@/lib/health";
 import { generateWeeklyRetro } from "@/lib/retro";
+import { processMemories } from "@/lib/memory/pipeline";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -25,6 +26,7 @@ export async function GET(request: NextRequest) {
     userId: string;
     journal: { success: boolean; error?: string };
     calendar: { success: boolean; error?: string };
+    memory: { success: boolean; error?: string };
     briefing: { success: boolean; error?: string };
     push: { success: boolean; sent?: number; error?: string };
     healthSnapshot: { success: boolean; error?: string };
@@ -36,6 +38,7 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       journal: { success: false },
       calendar: { success: false },
+      memory: { success: false },
       briefing: { success: false },
       push: { success: false },
       healthSnapshot: { success: false },
@@ -58,6 +61,18 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error(`[cron] Calendar sync failed for ${user.id}:`, error);
       result.calendar = {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+
+    // Memory extraction (parallel system — failures don't block briefing)
+    try {
+      await processMemories(user.id);
+      result.memory = { success: true };
+    } catch (error) {
+      console.error(`[cron] Memory processing failed for ${user.id}:`, error);
+      result.memory = {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };

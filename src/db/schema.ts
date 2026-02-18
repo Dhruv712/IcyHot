@@ -10,6 +10,7 @@ import {
   pgEnum,
   unique,
   uniqueIndex,
+  vector,
 } from "drizzle-orm/pg-core";
 
 export const relationshipTypeEnum = pgEnum("relationship_type", [
@@ -311,3 +312,70 @@ export const healthScoreSnapshots = pgTable(
     uniqueIndex("health_score_snapshots_user_date").on(table.userId, table.snapshotDate),
   ]
 );
+
+// ── Graph-Based Memory System ──────────────────────────────────────
+
+export const memories = pgTable(
+  "memories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    content: text("content").notNull(),
+    embedding: vector("embedding", { dimensions: 1024 }), // Voyage voyage-3
+    source: text("source").notNull(), // "journal" | "calendar" | "interaction"
+    sourceDate: date("source_date").notNull(),
+    contactIds: text("contact_ids"), // JSON array of related contact UUIDs
+    strength: real("strength").default(1.0).notNull(),
+    activationCount: integer("activation_count").default(1).notNull(),
+    lastActivatedAt: timestamp("last_activated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+);
+
+export const memoryConnections = pgTable(
+  "memory_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    memoryAId: uuid("memory_a_id")
+      .references(() => memories.id, { onDelete: "cascade" })
+      .notNull(),
+    memoryBId: uuid("memory_b_id")
+      .references(() => memories.id, { onDelete: "cascade" })
+      .notNull(),
+    weight: real("weight").default(0.5).notNull(),
+    reason: text("reason"), // Why these memories are connected
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    lastCoActivatedAt: timestamp("last_co_activated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("memory_connections_pair").on(table.memoryAId, table.memoryBId),
+  ]
+);
+
+export const memoryImplications = pgTable("memory_implications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  content: text("content").notNull(),
+  embedding: vector("embedding", { dimensions: 1024 }),
+  sourceMemoryIds: text("source_memory_ids").notNull(), // JSON array of memory UUIDs
+  strength: real("strength").default(1.0).notNull(),
+  lastReinforcedAt: timestamp("last_reinforced_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const memorySyncState = pgTable("memory_sync_state", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull()
+    .unique(),
+  processedFiles: text("processed_files"), // JSON array of processed filenames
+  lastProcessedAt: timestamp("last_processed_at"),
+});
