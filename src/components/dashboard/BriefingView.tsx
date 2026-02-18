@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useDailyBriefing } from "@/hooks/useBriefing";
 import { useJournalOpenLoops, useResolveOpenLoop, useSnoozeOpenLoop } from "@/hooks/useJournal";
 import { useDailySuggestions } from "@/hooks/useSuggestions";
+import { useHabits } from "@/hooks/useHabits";
 import { useLogInteraction } from "@/hooks/useInteractions";
 import BriefingSection from "./BriefingSection";
 import type { DailyBriefingContent } from "@/lib/briefing";
@@ -49,6 +51,10 @@ export default function BriefingView() {
   const resolveLoop = useResolveOpenLoop();
   const snoozeLoop = useSnoozeOpenLoop();
   const [snoozeOpenId, setSnoozeOpenId] = useState<string | null>(null);
+
+  // Habits
+  const { data: habitsData } = useHabits();
+  const router = useRouter();
 
   // Reach-out state
   const { data: suggestionsData } = useDailySuggestions();
@@ -231,6 +237,18 @@ export default function BriefingView() {
         </BriefingSection>
       )}
 
+      {/* Habits */}
+      {habitsData &&
+        (habitsData.contactStreaks.length > 0 || habitsData.behavioralHabits.length > 0) && (
+        <BriefingSection title="Habits" icon="🔁">
+          <HabitsContent
+            contactStreaks={habitsData.contactStreaks}
+            behavioralHabits={habitsData.behavioralHabits}
+            onContactClick={(contactId) => router.push(`/?select=${contactId}`)}
+          />
+        </BriefingSection>
+      )}
+
       {/* Temperature Alerts */}
       {briefing && briefing.temperatureAlerts.length > 0 && (
         <BriefingSection title="Drifting" icon="🌊">
@@ -339,6 +357,141 @@ export default function BriefingView() {
           <p className="text-sm text-[var(--text-muted)]">
             Your daily briefing will appear here once your journal and calendar are synced.
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Habits sub-component ──────────────────────────────────────────────
+
+interface ContactStreakHabit {
+  contactId: string;
+  name: string;
+  weeks: number;
+  thisWeekDone: boolean;
+}
+
+interface BehavioralHabit {
+  id: string;
+  content: string;
+  reinforcementCount: number;
+  lastReinforcedAt: string;
+  daysSinceReinforced: number;
+  active: boolean;
+}
+
+function HabitsContent({
+  contactStreaks,
+  behavioralHabits,
+  onContactClick,
+}: {
+  contactStreaks: ContactStreakHabit[];
+  behavioralHabits: BehavioralHabit[];
+  onContactClick: (contactId: string) => void;
+}) {
+  const hasBoth = contactStreaks.length > 0 && behavioralHabits.length > 0;
+  const dayOfWeek = new Date().getDay(); // 0=Sun, 4=Thu
+  const isLateInWeek = dayOfWeek >= 4 || dayOfWeek === 0; // Thu, Fri, Sat, Sun
+
+  return (
+    <div className="space-y-4">
+      {/* Contact streaks */}
+      {contactStreaks.length > 0 && (
+        <div>
+          {hasBoth && (
+            <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium mb-2">
+              People
+            </div>
+          )}
+          <div className="space-y-1.5">
+            {contactStreaks.map((streak) => {
+              const atRisk = !streak.thisWeekDone && isLateInWeek;
+              return (
+                <button
+                  key={streak.contactId}
+                  onClick={() => onContactClick(streak.contactId)}
+                  className={`w-full flex items-center gap-3 bg-[var(--bg-elevated)] rounded-xl px-4 py-2.5 transition-colors hover:bg-[var(--border-subtle)] text-left ${
+                    atRisk ? "ring-1 ring-[var(--amber)]/30" : ""
+                  }`}
+                >
+                  {/* Check / circle */}
+                  {streak.thisWeekDone ? (
+                    <div className="w-4 h-4 rounded-full bg-[var(--success)]/20 flex items-center justify-center flex-shrink-0">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                        <path d="M2 5.5L4 7.5L8 3" stroke="var(--success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                  ) : (
+                    <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${
+                      atRisk ? "border-[var(--amber)]/60" : "border-[var(--text-muted)]/40"
+                    }`} />
+                  )}
+
+                  {/* Name */}
+                  <span className="text-sm text-[var(--text-primary)] flex-1 min-w-0 truncate">
+                    {streak.name}
+                  </span>
+
+                  {/* Progress bar */}
+                  <div className="w-12 h-1.5 bg-[var(--border-medium)] rounded-full overflow-hidden flex-shrink-0">
+                    <div
+                      className="h-full rounded-full bg-[var(--amber)]"
+                      style={{ width: `${Math.min(streak.weeks / 8, 1) * 100}%` }}
+                    />
+                  </div>
+
+                  {/* Badge */}
+                  <span className="text-[11px] bg-[var(--amber-ghost-bg)] text-[var(--amber)] px-2 py-0.5 rounded-md flex-shrink-0">
+                    {streak.weeks}w
+                  </span>
+
+                  {/* At-risk indicator */}
+                  {atRisk && (
+                    <span className="text-[10px] text-[var(--amber)] flex-shrink-0">⚠</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Behavioral habits */}
+      {behavioralHabits.length > 0 && (
+        <div>
+          {hasBoth && (
+            <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium mb-2">
+              Personal
+            </div>
+          )}
+          <div className="space-y-1.5">
+            {behavioralHabits.map((habit) => (
+              <div
+                key={habit.id}
+                className={`flex items-center gap-3 bg-[var(--bg-elevated)] rounded-xl px-4 py-2.5 ${
+                  !habit.active ? "opacity-50" : ""
+                }`}
+              >
+                {/* Active dot */}
+                <div
+                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    habit.active ? "bg-[var(--success)]" : "bg-[var(--text-muted)]/40"
+                  }`}
+                />
+
+                {/* Description */}
+                <span className="text-sm text-[var(--text-primary)] flex-1 min-w-0 truncate">
+                  {habit.content}
+                </span>
+
+                {/* Reinforcement count */}
+                <span className="text-[11px] text-[var(--text-muted)] flex-shrink-0">
+                  ×{habit.reinforcementCount}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

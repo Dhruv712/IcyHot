@@ -13,6 +13,7 @@ import {
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { computeTemperature } from "./temperature";
 import { computeHealthScore } from "./health";
+import { computeStreaks, type ContactStreak } from "./streaks";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -41,12 +42,6 @@ interface TopMoment {
   summary: string;
 }
 
-interface Streak {
-  contactId: string;
-  name: string;
-  weeks: number;
-}
-
 export interface WeeklyRetroContent {
   weekSummary: string;
   stats: RetroStats;
@@ -54,7 +49,7 @@ export interface WeeklyRetroContent {
   risingContacts: ContactTempDelta[];
   fallingContacts: ContactTempDelta[];
   topMoments: TopMoment[];
-  streaks: Streak[];
+  streaks: ContactStreak[];
   patternsReinforced: string[];
   nextWeekPreview: string[];
 }
@@ -275,28 +270,12 @@ export async function generateWeeklyRetro(
   fallingContacts.sort((a, b) => (a.tempAfter - a.tempBefore) - (b.tempAfter - b.tempBefore));
 
   // ── Streaks ─────────────────────────────────────────────────────────
-  const streaks: Streak[] = [];
-  for (const c of allContacts) {
-    const contactInts = interactionsByContact.get(c.id) || [];
-    let consecutiveWeeks = 0;
-    // Check 8 consecutive weeks backwards from current week
-    for (let w = 0; w < 8; w++) {
-      const wStart = new Date(weekStart.getTime() - w * 7 * 24 * 60 * 60 * 1000);
-      const wEnd = new Date(wStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const hasInteraction = contactInts.some(
-        (i) => i.occurredAt >= wStart && i.occurredAt < wEnd
-      );
-      if (hasInteraction) {
-        consecutiveWeeks++;
-      } else {
-        break;
-      }
-    }
-    if (consecutiveWeeks >= 3) {
-      streaks.push({ contactId: c.id, name: c.name, weeks: consecutiveWeeks });
-    }
-  }
-  streaks.sort((a, b) => b.weeks - a.weeks);
+  const streaks = computeStreaks(
+    allContacts.map((c) => ({ id: c.id, name: c.name })),
+    allInteractions6m,
+    weekStart,
+    { minWeeks: 3, maxResults: 5 }
+  );
 
   // ── Stats ───────────────────────────────────────────────────────────
   const thisWeekContactIds = new Set(thisWeekInteractions.map((i) => i.contactId));

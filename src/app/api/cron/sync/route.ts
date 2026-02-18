@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { users, dailyBriefings, dailySuggestions } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { syncJournalEntries } from "@/lib/journal";
 import { syncCalendarEvents } from "@/lib/calendar";
 import { generateDailyBriefing } from "@/lib/briefing";
@@ -62,7 +63,20 @@ export async function GET(request: NextRequest) {
       };
     }
 
-    // Generate daily briefing after sync completes
+    // Invalidate stale briefing + suggestions so we regenerate with fresh synced data
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      await db.delete(dailyBriefings).where(
+        and(eq(dailyBriefings.userId, user.id), eq(dailyBriefings.briefingDate, today))
+      );
+      await db.delete(dailySuggestions).where(
+        and(eq(dailySuggestions.userId, user.id), eq(dailySuggestions.suggestedDate, today))
+      );
+    } catch (e) {
+      console.error(`[cron] Cache invalidation failed for ${user.id}:`, e);
+    }
+
+    // Generate daily briefing with fresh data
     try {
       const briefing = await generateDailyBriefing(user.id);
       result.briefing = { success: true };
