@@ -14,7 +14,8 @@ export interface ExtractedMemory {
 export async function extractMemories(
   journalText: string,
   entryDate: string,
-  existingContacts: { id: string; name: string }[]
+  existingContacts: { id: string; name: string }[],
+  timeoutMs: number = 40_000
 ): Promise<ExtractedMemory[]> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.error("[memory-extract] ANTHROPIC_API_KEY is not set!");
@@ -22,7 +23,7 @@ export async function extractMemories(
   }
 
   const client = new Anthropic({
-    timeout: 45_000, // 45s — leave headroom for embedding + storage within 60s Vercel limit
+    timeout: timeoutMs,
   });
 
   const contactListStr =

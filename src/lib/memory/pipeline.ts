@@ -24,9 +24,11 @@ export interface MemoryProcessResult {
 
 export async function processMemories(
   userId: string,
-  options?: { limit?: number }
+  options?: { limit?: number; deadlineMs?: number }
 ): Promise<MemoryProcessResult> {
   const maxFiles = options?.limit ?? Infinity;
+  // Default 55s deadline — leaves 5s buffer before Vercel's 60s kill
+  const deadline = Date.now() + (options?.deadlineMs ?? 55_000);
   const result: MemoryProcessResult = {
     filesProcessed: 0,
     memoriesCreated: 0,
@@ -67,6 +69,16 @@ export async function processMemories(
   // 4. Process each new file (up to limit)
   for (const file of newFiles) {
     if (result.filesProcessed >= maxFiles) break;
+
+    // Check if we have enough time left (need at least 15s for a full cycle)
+    const timeLeft = deadline - Date.now();
+    if (timeLeft < 15_000) {
+      console.log(
+        `[memory-pipeline] Only ${Math.round(timeLeft / 1000)}s left — stopping to avoid timeout`
+      );
+      break;
+    }
+
     const entryDate = parseJournalDate(file.name);
     if (!entryDate) {
       console.warn(`[memory-pipeline] Skipping "${file.name}" — can't parse date`);
@@ -84,12 +96,25 @@ export async function processMemories(
         continue;
       }
 
+      // Calculate dynamic timeout for LLM extraction based on remaining time
+      const extractionTimeout = Math.max(deadline - Date.now() - 15_000, 10_000);
+      console.log(`[memory-pipeline] Extraction timeout: ${Math.round(extractionTimeout / 1000)}s`);
+
       // Extract memories via LLM
-      const extracted = await extractMemories(content, entryDate, allContacts);
+      const extracted = await extractMemories(content, entryDate, allContacts, extractionTimeout);
       if (extracted.length === 0) {
         console.log(`[memory-pipeline] No memories extracted from "${file.name}"`);
         processedSet.add(file.name);
         continue;
+      }
+
+      // Check if we still have enough time for embedding + storage (~12s needed)
+      const timeAfterExtract = deadline - Date.now();
+      if (timeAfterExtract < 12_000) {
+        console.log(
+          `[memory-pipeline] Only ${Math.round(timeAfterExtract / 1000)}s left after extraction — skipping storage, will retry next call`
+        );
+        break;
       }
 
       // Store with embedding + semantic dedup
