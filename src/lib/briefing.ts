@@ -128,13 +128,13 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     }));
 
   // If we have no context at all, skip LLM and return a lightweight briefing
-  if (todayEvents.length === 0 && patternAlerts.length === 0 && temperatureAlerts.length === 0) {
+  if (todayEvents.length === 0 && patternAlerts.length === 0 && temperatureAlerts.length === 0 && activeLoops.length === 0) {
     const briefing: DailyBriefingContent = {
       todayContext: [],
       patternAlerts,
       relationshipArc: null,
       temperatureAlerts,
-      summary: "A quiet day — no meetings on the calendar. A good time for reflection or reaching out to someone you've been meaning to connect with.",
+      summary: "No meetings today and no one's going cold. You're in good shape.",
     };
     await saveBriefing(userId, today, briefing);
     return briefing;
@@ -242,9 +242,31 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     }
 
     if (temperatureAlerts.length > 0) {
-      contextParts.push("\nCOOLING CONTACTS:");
+      contextParts.push("\nCOOLING CONTACTS (these people need outreach):");
       for (const t of temperatureAlerts) {
-        contextParts.push(`- ${t.contactName} (importance: ${t.importance}): ${t.daysSinceLastInteraction} days since last interaction`);
+        const contact = allContacts.find((c) => c.id === t.contactId);
+        const contactGroupNames = groupsByContact.get(t.contactId) || [];
+        const lastInteractions = recentInteractions
+          .filter((i) => i.contactId === t.contactId)
+          .slice(0, 2);
+        const contactLoops = activeLoops.filter((l) => l.contactId === t.contactId);
+
+        contextParts.push(`- ${t.contactName} (importance: ${t.importance}/10): ${t.daysSinceLastInteraction} days since last interaction`);
+        if (contact) {
+          contextParts.push(`  Relationship: ${contact.relationshipType}`);
+        }
+        if (contact?.notes) {
+          contextParts.push(`  Notes: ${contact.notes.slice(0, 200)}`);
+        }
+        if (contactGroupNames.length > 0) {
+          contextParts.push(`  Groups: ${contactGroupNames.join(", ")}`);
+        }
+        if (lastInteractions.length > 0) {
+          contextParts.push(`  Last interactions: ${lastInteractions.map((i) => `[${i.sentiment || "neutral"}] ${i.note?.slice(0, 100) || "no notes"}`).join("; ")}`);
+        }
+        if (contactLoops.length > 0) {
+          contextParts.push(`  Open loops: ${contactLoops.map((l) => l.content).join("; ")}`);
+        }
       }
     }
 
@@ -288,27 +310,39 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
       messages: [
         {
           role: "user",
-          content: `You are Dhruv's personal relationship intelligence system. Generate a daily briefing for ${today}. Write in second person ("you"). Be warm, thoughtful, and contextually rich.
+          content: `You are Dhruv's personal relationship manager. Generate a daily briefing for ${today}. Write in second person ("you").
 
-You have rich context including relationship types, personal notes, group memberships, sentiment trends, and personal reflections. Use these to create nuanced, deeply contextual meeting prep and a narrative summary that weaves the day together.
+TONE RULES — follow these strictly:
+- Be direct and specific. Never hedge with "perhaps", "consider", "might be an opportunity", "could be a good time to".
+- Every suggestion must be a concrete action: "Text Sarah about X", "Ask John how Y went", "Send Amy the link to Z".
+- Reference specific details from the context (last interaction topics, open loops, notes). Don't be generic.
+- If you don't have enough context to say something specific, say less rather than filling space with platitudes.
+- Never use therapy-speak or horoscope language. No "threads in your life's tapestry" or "invites reflection."
 
-CRITICAL: Pay close attention to the "Total interactions on record" for each contact. If a contact has 0 or 1 total interactions, this is likely a new or very recent connection — do NOT write as if Dhruv already has an established relationship with them. Instead, frame the briefing around getting to know them, first impressions, or preparation for an initial meeting. Only reference shared history if multiple prior interactions exist.
+FAMILIARITY RULES:
+- Pay close attention to "Total interactions on record." If a contact has 0-1 interactions, this is a new connection — don't assume shared history.
+- Only reference specific past events if they appear in the context data.
 
+${todayEvents.length === 0 ? `NO-MEETING DAY RULES:
+- This is an open day. The cooling contacts ARE the main event — treat each one with the same depth as a meeting prep.
+- For each cooling contact, give a specific outreach suggestion: what to say, how to reach out (text, call, grab coffee), and what NOT to bring up if relevant.
+- The summary should read like a short to-do list: who to reach out to, in priority order, with one reason why for each.
+` : ""}
 ${contextStr}
 
 Return ONLY valid JSON:
 {
   "todayContext": [
-    { "contactId": "...", "contactName": "...", "eventSummary": "...", "eventTime": "...", "briefing": "2-3 sentence prep note for this meeting. Weave in relationship type, group context, sentiment trends, personal notes, and relevant personal reflections. For new contacts (0-1 prior interactions), focus on first impressions and getting to know them. For established contacts, reference shared history and emotional context." }
+    { "contactId": "...", "contactName": "...", "eventSummary": "...", "eventTime": "...", "briefing": "2-3 sentence prep note. Be specific: what to bring up, what to remember from last time, any open loops to close. For new contacts, focus on what you know and what to ask about." }
   ],
-  "relationshipArc": ${arcCandidate ? `{ "contactId": "${arcCandidate.contactId}", "contactName": "${arcCandidate.contactName}", "arc": "2-3 sentence narrative of how this relationship has evolved recently" }` : "null"},
+  "relationshipArc": ${arcCandidate ? `{ "contactId": "${arcCandidate.contactId}", "contactName": "${arcCandidate.contactName}", "arc": "2-3 sentence narrative of how this relationship has evolved based on the dynamics data" }` : "null"},
   "temperatureAlerts": [
-    { "contactId": "...", "contactName": "...", "importance": N, "daysSinceLastInteraction": N, "suggestion": "1 sentence natural suggestion for reconnecting" }
+    { "contactId": "...", "contactName": "...", "importance": N, "daysSinceLastInteraction": N, "suggestion": "A specific action: 'Text her about X' or 'Send him that article about Y' — not 'consider reaching out'" }
   ],
-  "summary": "3-4 sentence narrative that weaves together today's meetings, relationship themes, cooling contacts, and any open loops into a cohesive picture of the day ahead. If personal reflections are relevant, thread them in naturally. Set the tone — what kind of day is this?"
+  "summary": "3-4 sentences. ${todayEvents.length === 0 ? "Lead with who to reach out to today, in priority order, with a specific reason for each. End with any open loops that need attention." : "Lead with what matters most today — the key meeting or interaction. Then priorities for the rest of the day. End with any open loops to close."}"
 }
 
-Only include contacts that appear in the context above. Keep it genuine and natural.`,
+Only include contacts that appear in the context above.`,
         },
       ],
     });
