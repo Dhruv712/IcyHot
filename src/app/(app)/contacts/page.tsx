@@ -80,7 +80,7 @@ export default function ContactsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-4xl mx-auto p-6">
+      <div className="max-w-4xl mx-auto p-4 md:p-6">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">People</h1>
@@ -91,7 +91,7 @@ export default function ContactsPage() {
 
         {/* Search + Filters */}
         <div className="flex flex-wrap items-center gap-3 mb-5">
-          <div className="flex-1 min-w-[200px]">
+          <div className="w-full md:flex-1 md:min-w-[200px]">
             <input
               type="text"
               value={search}
@@ -100,38 +100,40 @@ export default function ContactsPage() {
               className="w-full bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--amber)]"
             />
           </div>
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-3 py-2.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--amber)]"
-          >
-            <option value="all">All types</option>
-            {Object.entries(RELATIONSHIP_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-          {groups && groups.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto">
             <select
-              value={filterGroup}
-              onChange={(e) => setFilterGroup(e.target.value)}
-              className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-3 py-2.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--amber)]"
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-3 py-2.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--amber)] flex-shrink-0"
             >
-              <option value="all">All groups</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>{g.name}</option>
+              <option value="all">All types</option>
+              {Object.entries(RELATIONSHIP_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
               ))}
             </select>
-          )}
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-3 py-2.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--amber)]"
-          >
-            <option value="name">Sort: Name</option>
-            <option value="temperature">Sort: Temperature</option>
-            <option value="lastInteraction">Sort: Last Contact</option>
-            <option value="importance">Sort: Importance</option>
-          </select>
+            {groups && groups.length > 0 && (
+              <select
+                value={filterGroup}
+                onChange={(e) => setFilterGroup(e.target.value)}
+                className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-3 py-2.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--amber)] flex-shrink-0"
+              >
+                <option value="all">All groups</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            )}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortKey)}
+              className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-3 py-2.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--amber)] flex-shrink-0"
+            >
+              <option value="name">Sort: Name</option>
+              <option value="temperature">Sort: Temperature</option>
+              <option value="lastInteraction">Sort: Last Contact</option>
+              <option value="importance">Sort: Importance</option>
+            </select>
+          </div>
         </div>
 
         {/* Contact List */}
@@ -180,7 +182,7 @@ export default function ContactsPage() {
                   </div>
 
                   {/* Temperature */}
-                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <div className="hidden md:flex flex-col items-end gap-1 flex-shrink-0">
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 bg-[var(--border-medium)] rounded-full overflow-hidden">
                         <div
@@ -204,7 +206,7 @@ export default function ContactsPage() {
 
                   {/* Arrow */}
                   <svg
-                    className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--amber)] transition-colors flex-shrink-0"
+                    className="hidden md:block w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--amber)] transition-colors flex-shrink-0"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"

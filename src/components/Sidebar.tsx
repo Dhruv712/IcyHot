@@ -73,132 +73,172 @@ export default function Sidebar({
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <aside
-      className={`h-screen flex flex-col bg-[var(--bg-card)] border-r border-[var(--border-subtle)] transition-all duration-200 flex-shrink-0 ${
-        collapsed ? "w-[56px]" : "w-[220px]"
-      }`}
-    >
-      {/* Logo + collapse */}
-      <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border-subtle)]">
-        {!collapsed && (
-          <h1 className="text-lg font-bold tracking-tight">
-            <span className="text-[var(--amber)]">Icy</span>
-            <span className="text-[var(--text-primary)]">Hot</span>
-          </h1>
-        )}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors p-1"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            {collapsed ? (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            )}
-          </svg>
-        </button>
-      </div>
+    <>
+      {/* ── Desktop Sidebar ─────────────────────────────────────── */}
+      <aside
+        className={`hidden md:flex h-screen flex-col bg-[var(--bg-card)] border-r border-[var(--border-subtle)] transition-all duration-200 flex-shrink-0 ${
+          collapsed ? "w-[56px]" : "w-[220px]"
+        }`}
+      >
+        {/* Logo + collapse */}
+        <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border-subtle)]">
+          {!collapsed && (
+            <h1 className="text-lg font-bold tracking-tight">
+              <span className="text-[var(--amber)]">Icy</span>
+              <span className="text-[var(--text-primary)]">Hot</span>
+            </h1>
+          )}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors p-1"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              {collapsed ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              )}
+            </svg>
+          </button>
+        </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 py-3 px-2 space-y-1">
+        {/* Navigation */}
+        <nav className="flex-1 py-3 px-2 space-y-1">
+          {NAV_ITEMS.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors relative ${
+                  isActive
+                    ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
+                }`}
+                title={collapsed ? item.label : undefined}
+              >
+                {isActive && (
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[var(--amber)] rounded-r-full" />
+                )}
+                <span className="flex-shrink-0 relative">
+                  {item.icon}
+                  {item.href === "/" && driftingCount > 0 && (
+                    <span
+                      className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center bg-[var(--amber)] text-[var(--bg-base)] text-[10px] font-bold rounded-full px-1"
+                      title={`${driftingCount} important contact${driftingCount === 1 ? "" : "s"} going cold`}
+                    >
+                      {driftingCount}
+                    </span>
+                  )}
+                </span>
+                {!collapsed && (
+                  <span className="text-sm font-medium flex items-center gap-2">
+                    {item.label}
+                    {item.href === "/" && driftingCount > 0 && (
+                      <span className="text-[10px] font-normal text-[var(--amber)] opacity-80">
+                        {driftingCount} drifting
+                      </span>
+                    )}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Actions */}
+        <div className="px-2 py-3 border-t border-[var(--border-subtle)] space-y-1">
+          {/* Add Person */}
+          <button
+            onClick={onAddPerson}
+            className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--amber)] hover:bg-[var(--amber-ghost-bg)] transition-colors w-full ${
+              collapsed ? "justify-center" : ""
+            }`}
+            title={collapsed ? "Add Person" : undefined}
+          >
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            {!collapsed && <span className="text-sm font-medium">Add Person</span>}
+          </button>
+
+          {/* Calendar Sync */}
+          {calendarConnected && (
+            <button
+              onClick={onSyncCalendar}
+              disabled={calendarSyncing}
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors w-full disabled:opacity-50 ${
+                collapsed ? "justify-center" : ""
+              }`}
+              title={collapsed ? "Sync Calendar" : undefined}
+            >
+              <span className={`text-base flex-shrink-0 ${calendarSyncing ? "animate-spin" : ""}`}>🔄</span>
+              {!collapsed && <span className="text-sm">Calendar</span>}
+            </button>
+          )}
+
+          {/* Journal Sync */}
+          {journalConfigured && (
+            <button
+              onClick={onSyncJournal}
+              disabled={journalSyncing}
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors w-full disabled:opacity-50 ${
+                collapsed ? "justify-center" : ""
+              }`}
+              title={collapsed ? "Sync Journal" : undefined}
+            >
+              <span className={`text-base flex-shrink-0 ${journalSyncing ? "animate-spin" : ""}`}>📓</span>
+              {!collapsed && <span className="text-sm">Journal</span>}
+            </button>
+          )}
+
+          {/* Notifications */}
+          <NotificationToggle collapsed={collapsed} />
+        </div>
+
+        {/* Health Score */}
+        <div className={`px-4 py-3 border-t border-[var(--border-subtle)] ${collapsed ? "px-2 flex justify-center" : ""}`}>
+          <HealthScore score={healthScore} contactCount={contactCount} compact={collapsed} />
+        </div>
+      </aside>
+
+      {/* ── Mobile Bottom Nav ───────────────────────────────────── */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 flex md:hidden items-center justify-around bg-[var(--bg-card)] border-t border-[var(--border-subtle)] h-16 px-2 safe-area-pb">
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors relative ${
+              className={`flex flex-col items-center gap-0.5 py-1.5 px-3 rounded-xl transition-colors ${
                 isActive
-                  ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
+                  ? "text-[var(--amber)]"
+                  : "text-[var(--text-muted)]"
               }`}
-              title={collapsed ? item.label : undefined}
             >
-              {isActive && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[var(--amber)] rounded-r-full" />
-              )}
-              <span className="flex-shrink-0 relative">
+              <span className="relative">
                 {item.icon}
                 {item.href === "/" && driftingCount > 0 && (
-                  <span
-                    className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center bg-[var(--amber)] text-[var(--bg-base)] text-[10px] font-bold rounded-full px-1"
-                    title={`${driftingCount} important contact${driftingCount === 1 ? "" : "s"} going cold`}
-                  >
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 flex items-center justify-center bg-[var(--amber)] text-[var(--bg-base)] text-[9px] font-bold rounded-full px-0.5">
                     {driftingCount}
                   </span>
                 )}
               </span>
-              {!collapsed && (
-                <span className="text-sm font-medium flex items-center gap-2">
-                  {item.label}
-                  {item.href === "/" && driftingCount > 0 && (
-                    <span className="text-[10px] font-normal text-[var(--amber)] opacity-80">
-                      {driftingCount} drifting
-                    </span>
-                  )}
-                </span>
-              )}
+              <span className="text-[10px] font-medium">{item.label}</span>
             </Link>
           );
         })}
-      </nav>
-
-      {/* Actions */}
-      <div className="px-2 py-3 border-t border-[var(--border-subtle)] space-y-1">
-        {/* Add Person */}
         <button
           onClick={onAddPerson}
-          className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--amber)] hover:bg-[var(--amber-ghost-bg)] transition-colors w-full ${
-            collapsed ? "justify-center" : ""
-          }`}
-          title={collapsed ? "Add Person" : undefined}
+          className="flex flex-col items-center gap-0.5 py-1.5 px-3 rounded-xl text-[var(--amber)] transition-colors"
         >
-          <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
-          {!collapsed && <span className="text-sm font-medium">Add Person</span>}
+          <span className="text-[10px] font-medium">Add</span>
         </button>
-
-        {/* Calendar Sync */}
-        {calendarConnected && (
-          <button
-            onClick={onSyncCalendar}
-            disabled={calendarSyncing}
-            className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors w-full disabled:opacity-50 ${
-              collapsed ? "justify-center" : ""
-            }`}
-            title={collapsed ? "Sync Calendar" : undefined}
-          >
-            <span className={`text-base flex-shrink-0 ${calendarSyncing ? "animate-spin" : ""}`}>🔄</span>
-            {!collapsed && <span className="text-sm">Calendar</span>}
-          </button>
-        )}
-
-        {/* Journal Sync */}
-        {journalConfigured && (
-          <button
-            onClick={onSyncJournal}
-            disabled={journalSyncing}
-            className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors w-full disabled:opacity-50 ${
-              collapsed ? "justify-center" : ""
-            }`}
-            title={collapsed ? "Sync Journal" : undefined}
-          >
-            <span className={`text-base flex-shrink-0 ${journalSyncing ? "animate-spin" : ""}`}>📓</span>
-            {!collapsed && <span className="text-sm">Journal</span>}
-          </button>
-        )}
-
-        {/* Notifications */}
-        <NotificationToggle collapsed={collapsed} />
-      </div>
-
-      {/* Health Score */}
-      <div className={`px-4 py-3 border-t border-[var(--border-subtle)] ${collapsed ? "px-2 flex justify-center" : ""}`}>
-        <HealthScore score={healthScore} contactCount={contactCount} compact={collapsed} />
-      </div>
-    </aside>
+      </nav>
+    </>
   );
 }

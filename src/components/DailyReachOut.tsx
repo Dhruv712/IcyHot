@@ -100,7 +100,7 @@ export default function DailyReachOut({
   return (
     <div className="absolute top-4 left-0 right-0 z-20 flex justify-center px-4 pointer-events-none">
       <div
-        className="pointer-events-auto bg-[var(--bg-card)]/95 backdrop-blur-sm border border-[var(--border-subtle)] rounded-2xl px-5 py-4 max-w-xl w-full shadow-2xl"
+        className="pointer-events-auto bg-[var(--bg-card)]/95 backdrop-blur-sm border border-[var(--border-subtle)] rounded-2xl px-3 py-3 md:px-5 md:py-4 max-w-xl w-full shadow-2xl"
         style={{ animation: "slideDown 0.3s ease-out" }}
       >
         {/* Header */}

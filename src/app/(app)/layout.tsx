@@ -106,7 +106,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   ).length;
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden">
+    <div className="h-screen w-screen flex flex-col md:flex-row overflow-hidden">
       <Sidebar
         healthScore={graphData?.healthScore ?? 0}
         contactCount={contactNodes.length}
@@ -121,7 +121,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       />
 
       {/* Main content area */}
-      <main className="flex-1 relative overflow-hidden">
+      <main className="flex-1 relative overflow-hidden pb-16 md:pb-0">
         {/* Sync toast */}
         {syncMessage && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">

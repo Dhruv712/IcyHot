@@ -120,7 +120,7 @@ const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(function ForceG
       {/* Tooltip */}
       {tooltip && (
         <div
-          className="fixed pointer-events-none z-50 bg-gray-900/95 border border-gray-700 rounded-lg px-3 py-2 text-sm shadow-xl"
+          className="hidden md:block fixed pointer-events-none z-50 bg-gray-900/95 border border-gray-700 rounded-lg px-3 py-2 text-sm shadow-xl"
           style={{
             left: tooltip.x + 16,
             top: tooltip.y - 10,

@@ -36,6 +36,12 @@ body {
   color: var(--text-primary);
 }
 
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 @keyframes slideDown {
   from {
     opacity: 0;

@@ -158,7 +158,7 @@ export default function QuickLogButton({ nodes, groups, onInteractionLogged }: Q
       {/* FAB */}
       <button
         onClick={() => setOpen(true)}
-        className="fixed right-4 bottom-4 w-12 h-12 bg-[var(--amber)] hover:bg-[var(--amber-hover)] text-[var(--bg-base)] rounded-full shadow-lg shadow-[var(--amber)]/25 flex items-center justify-center text-xl z-30 transition-colors font-medium"
+        className="fixed right-4 bottom-20 md:bottom-4 w-12 h-12 bg-[var(--amber)] hover:bg-[var(--amber-hover)] text-[var(--bg-base)] rounded-full shadow-lg shadow-[var(--amber)]/25 flex items-center justify-center text-xl z-30 transition-colors font-medium"
         title="Log interaction (L)"
       >
         +

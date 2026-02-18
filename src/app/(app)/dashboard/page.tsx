@@ -38,7 +38,7 @@ export default function DashboardPage() {
   return (
     <div className="h-full overflow-y-auto">
       {/* Tab toggle */}
-      <div className="max-w-[640px] mx-auto px-6 pt-4">
+      <div className="max-w-[640px] mx-auto px-4 pt-3 md:px-6 md:pt-4">
         <Tabs tabs={DASHBOARD_TABS} activeKey={activeTab} onChange={setActiveTab} />
       </div>
 
@@ -51,7 +51,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Collapsible Details */}
-      <div className="max-w-4xl mx-auto px-6 pb-8">
+      <div className="max-w-4xl mx-auto px-4 pb-24 md:px-6 md:pb-8">
         <button
           onClick={() => setDetailsOpen(!detailsOpen)}
           className="flex items-center gap-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors py-2 mb-3"

@@ -201,7 +201,9 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
   const tempPercent = Math.round(node.temperature * 100);
 
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-[var(--bg-card)]/95 border-l border-[var(--border-subtle)] backdrop-blur-sm z-40 flex flex-col overflow-hidden">
+    <div className="fixed inset-x-0 bottom-0 top-12 w-full rounded-t-2xl border-t md:inset-auto md:right-0 md:top-0 md:h-full md:w-96 md:rounded-none md:border-t-0 md:border-l bg-[var(--bg-card)]/95 border-[var(--border-subtle)] backdrop-blur-sm z-40 flex flex-col overflow-hidden">
+      {/* Mobile drag handle */}
+      <div className="md:hidden w-10 h-1 bg-[var(--border-medium)] rounded-full mx-auto mt-2 mb-1" />
       {/* Header */}
       <div className="p-5 border-b border-[var(--border-subtle)]">
         <div className="flex items-start justify-between">

@@ -63,13 +63,20 @@ export default function GraphPage() {
         <ForceGraph ref={graphRef} data={graphData ?? null} onNodeClick={handleNodeClick} />
       )}
 
-      {/* Contact Panel (sidebar) */}
+      {/* Contact Panel (sidebar / mobile sheet) */}
       {selectedNode && (
-        <ContactPanel
-          node={selectedNode}
-          onClose={() => setSelectedNodeId(null)}
-          onInteractionLogged={handleWarmthBurst}
-        />
+        <>
+          {/* Mobile backdrop */}
+          <div
+            className="fixed inset-0 bg-black/40 z-30 md:hidden"
+            onClick={() => setSelectedNodeId(null)}
+          />
+          <ContactPanel
+            node={selectedNode}
+            onClose={() => setSelectedNodeId(null)}
+            onInteractionLogged={handleWarmthBurst}
+          />
+        </>
       )}
 
       {/* Quick Log Button */}
