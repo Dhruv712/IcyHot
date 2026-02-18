@@ -37,6 +37,7 @@ interface ConsolidationResult {
   connectionsStrengthened: number;
   implicationsCreated: number;
   implicationsReinforced: number;
+  implicationsDeduped: number;
 }
 
 // ── Similarity threshold for semantic clustering ────────────────────
@@ -44,7 +45,7 @@ interface ConsolidationResult {
 const CLUSTER_SIMILARITY = 0.65; // Lower than dedup (0.92) — we want related, not duplicate
 const MAX_CLUSTER_SIZE = 15; // Don't send too many memories to the LLM
 const MIN_CLUSTER_SIZE = 3; // Need at least 3 memories for meaningful connections
-const IMPLICATION_DEDUP_THRESHOLD = 0.88; // Similarity threshold for deduplicating implications
+const IMPLICATION_DEDUP_THRESHOLD = 0.80; // Similarity threshold for deduplicating implications (lowered from 0.88 — paraphrased implications need to be caught)
 
 // ── Main entry point ───────────────────────────────────────────────
 
@@ -59,7 +60,11 @@ export async function consolidateMemories(
     connectionsStrengthened: 0,
     implicationsCreated: 0,
     implicationsReinforced: 0,
+    implicationsDeduped: 0,
   };
+
+  // 0. Dedup existing implications (clean up any past duplicates)
+  result.implicationsDeduped = await deduplicateImplications(userId);
 
   // 1. Get all memories for this user that have embeddings
   const allMemories = await db
@@ -560,4 +565,80 @@ async function storeImplication(
   });
 
   return "created";
+}
+
+// ── Dedup existing implications ─────────────────────────────────────
+
+async function deduplicateImplications(userId: string): Promise<number> {
+  // Get all implications for this user, ordered by strength desc (keep the strongest)
+  const allImplications = await db
+    .select({
+      id: memoryImplications.id,
+      content: memoryImplications.content,
+      strength: memoryImplications.strength,
+    })
+    .from(memoryImplications)
+    .where(
+      and(
+        eq(memoryImplications.userId, userId),
+        sql`${memoryImplications.embedding} IS NOT NULL`
+      )
+    )
+    .orderBy(sql`${memoryImplications.strength} DESC`);
+
+  if (allImplications.length < 2) return 0;
+
+  const idsToDelete: string[] = [];
+  const kept = new Set<string>();
+
+  for (const impl of allImplications) {
+    if (idsToDelete.includes(impl.id)) continue;
+    if (kept.has(impl.id)) continue;
+
+    kept.add(impl.id);
+
+    // Find duplicates of this implication (similar above threshold)
+    const duplicates = await db.execute(sql`
+      SELECT id, content, strength,
+        1 - (embedding <=> (SELECT embedding FROM memory_implications WHERE id = ${impl.id})) as similarity
+      FROM memory_implications
+      WHERE user_id = ${userId}
+        AND id != ${impl.id}
+        AND embedding IS NOT NULL
+        AND 1 - (embedding <=> (SELECT embedding FROM memory_implications WHERE id = ${impl.id})) > ${IMPLICATION_DEDUP_THRESHOLD}
+      ORDER BY similarity DESC
+    `);
+
+    const dupRows = duplicates.rows as Array<{
+      id: string;
+      content: string;
+      strength: number;
+      similarity: number;
+    }>;
+
+    for (const dup of dupRows) {
+      if (!kept.has(dup.id) && !idsToDelete.includes(dup.id)) {
+        idsToDelete.push(dup.id);
+        console.log(
+          `[consolidate] Dedup: removing "${dup.content.slice(0, 60)}..." (sim=${dup.similarity.toFixed(3)}) — keeping "${impl.content.slice(0, 60)}..."`
+        );
+      }
+    }
+  }
+
+  if (idsToDelete.length > 0) {
+    for (let i = 0; i < idsToDelete.length; i += 10) {
+      const batch = idsToDelete.slice(i, i + 10);
+      await db
+        .delete(memoryImplications)
+        .where(
+          sql`${memoryImplications.id} IN (${sql.join(batch.map((id) => sql`${id}`), sql`, `)})`
+        );
+    }
+    console.log(
+      `[consolidate] Deduped ${idsToDelete.length} duplicate implications`
+    );
+  }
+
+  return idsToDelete.length;
 }
