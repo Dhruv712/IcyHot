@@ -15,7 +15,7 @@ export async function extractMemories(
   journalText: string,
   entryDate: string,
   existingContacts: { id: string; name: string }[],
-  timeoutMs: number = 40_000
+  timeoutMs: number = 90_000
 ): Promise<ExtractedMemory[]> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.error("[memory-extract] ANTHROPIC_API_KEY is not set!");

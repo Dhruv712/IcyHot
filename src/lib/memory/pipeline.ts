@@ -27,8 +27,8 @@ export async function processMemories(
   options?: { limit?: number; deadlineMs?: number }
 ): Promise<MemoryProcessResult> {
   const maxFiles = options?.limit ?? Infinity;
-  // Default 55s deadline — leaves 5s buffer before Vercel's 60s kill
-  const deadline = Date.now() + (options?.deadlineMs ?? 55_000);
+  // Default 120s deadline — conservative within Vercel's 300s fluid compute limit
+  const deadline = Date.now() + (options?.deadlineMs ?? 120_000);
   const result: MemoryProcessResult = {
     filesProcessed: 0,
     memoriesCreated: 0,

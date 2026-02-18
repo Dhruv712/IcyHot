@@ -5,7 +5,7 @@ import { memories, memorySyncState } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { processMemories } from "@/lib/memory/pipeline";
 
-export const maxDuration = 60;
+export const maxDuration = 300; // Vercel Hobby with fluid compute allows up to 300s
 
 export async function POST(request: NextRequest) {
   const session = await auth();
