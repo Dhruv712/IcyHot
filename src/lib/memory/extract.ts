@@ -21,7 +21,9 @@ export async function extractMemories(
     return [];
   }
 
-  const client = new Anthropic();
+  const client = new Anthropic({
+    timeout: 45_000, // 45s — leave headroom for embedding + storage within 60s Vercel limit
+  });
 
   const contactListStr =
     existingContacts.length > 0
@@ -39,15 +41,15 @@ ${contactListStr}
 
 ## ${journalText}
 
-Extract every discrete, atomic piece of information from this journal entry. Each memory should capture ONE meaningful thing — a single fact, event, feeling, decision, observation, or plan.
+Extract every discrete, atomic piece of information from this journal entry. Each memory should capture one meaningful thing — a single fact, event, feeling, decision, observation, or plan.
 
 CRITICAL: Every memory must be SELF-CONTAINED. Someone reading a single memory in isolation, months from now, with no other context, must fully understand WHEN it happened, WHERE it happened, WHO was involved (and who they are), and WHAT the situation was. Always embed:
 - Temporal context: date, time of day, "during X meeting"
-- Location context: city, neighborhood, venue, or setting ("in Palo Alto", "at Café Lomi in the 10th arrondissement", "on a Zoom call from your apartment in Paris")
+- Location context with maximum inferrable detail: city, neighborhood, venue, or setting ("in Palo Alto", "at Café Lomi in the 10th arrondissement", "on a Zoom call from your apartment in Paris")
 - Relational context: who the person is — "your girlfriend", "a neuroscience professor at Stanford", "your cofounder"
 - Situational context: what event or setting this occurred in
 
-If the journal entry mentions or implies a location (city, country, venue, neighborhood, "at home", "at the office", etc.), ALWAYS include it in the memory. If Dhruv is writing from a particular city or country, embed that geographic context.
+If the journal entry mentions or implies a location (city, country, venue, neighborhood, "at home", "at the office", etc.), ALWAYS include it in the memory. If Dhruv is writing from a particular city or country, embed that geographic context IN EACH MEMORY from that context.
 
 Return ONLY valid JSON (no markdown, no explanation):
 
@@ -134,7 +136,7 @@ PLACES & EXPERIENCES:
    * Journal: "Eventually the guy sitting next to me, whose name was Marquel, and I were just freaking out over the views."
    * BAD: "You and Marquel were freaking out over the views"
    * GOOD: "You and Marquel, the guy who sat next to you on your flight from San Francisco to Los Angeles on Friday, January 16, 2026, were freaking out together over how beautiful the views were"
-12. For contactNames: match to the known contacts list. Use the exact name as it appears in the contact list, first AND last if available. If the journal uses a nickname or first name only, match it to the most likely contact. When a last name is not specified and the person is not in the contacts list, add the most relevant identifying descriptor instead.
+12. For contactNames: match to the known contacts list. Use the exact name as it appears in the contact list, first AND last if available. If the journal uses a nickname or first name only, match it to the most likely contact. If uncertain about who the most likely contact is, still match it, but write "(inferred last name)" after the name. If a last name is not specified AND the person is not in the contacts list, add the most relevant identifying descriptor instead.
 13. For significance:
    - "high": Major life events, important decisions, strong emotions, relationship milestones
    - "medium": Notable interactions, interesting observations, plans being made

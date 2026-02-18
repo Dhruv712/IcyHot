@@ -27,25 +27,26 @@ export async function storeMemories(
   let reinforced = 0;
 
   // 2. For each memory, check for semantic duplicates and insert/reinforce
-  for (let i = 0; i < extracted.length; i++) {
-    const memory = extracted[i];
-    const embedding = embeddings[i];
-
-    try {
-      const result = await storeOneMemory(
-        userId,
-        memory,
-        embedding,
-        entryDate,
-        contacts
-      );
-      if (result === "created") created++;
-      else if (result === "reinforced") reinforced++;
-    } catch (error) {
-      console.error(
-        `[memory-store] Failed to store memory: "${memory.content.slice(0, 50)}..."`,
-        error
-      );
+  //    Run in parallel batches of 5 to speed up within Vercel's 60s limit
+  const BATCH_SIZE = 5;
+  for (let start = 0; start < extracted.length; start += BATCH_SIZE) {
+    const batch = extracted.slice(start, start + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((memory, j) =>
+        storeOneMemory(userId, memory, embeddings[start + j], entryDate, contacts)
+      )
+    );
+    for (let k = 0; k < results.length; k++) {
+      const r = results[k];
+      if (r.status === "fulfilled") {
+        if (r.value === "created") created++;
+        else if (r.value === "reinforced") reinforced++;
+      } else {
+        console.error(
+          `[memory-store] Failed to store memory: "${batch[k].content.slice(0, 50)}..."`,
+          r.reason
+        );
+      }
     }
   }
 
