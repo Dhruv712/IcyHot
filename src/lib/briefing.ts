@@ -12,6 +12,7 @@ import {
   contactGroups,
 } from "@/db/schema";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
+import { retrieveMemories } from "./memory/retrieve";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -141,6 +142,35 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     return briefing;
   }
 
+  // ── Retrieve memories for context enrichment ──────────────────────
+  // For each unique contact in meetings + cooling alerts, retrieve relevant memories
+  const contactIdsForMemory = new Set<string>();
+  for (const e of todayEvents) contactIdsForMemory.add(e.contactId);
+  for (const t of temperatureAlerts) contactIdsForMemory.add(t.contactId);
+
+  const memoryByContact = new Map<string, { memories: string[]; implications: string[] }>();
+
+  try {
+    const memoryPromises = Array.from(contactIdsForMemory).map(async (contactId) => {
+      const contact = allContacts.find((c) => c.id === contactId);
+      if (!contact) return;
+      const result = await retrieveMemories(userId, contact.name, {
+        maxMemories: 5,
+        maxHops: 1,
+        contactFilter: contactId,
+        skipHebbian: true, // Don't inflate activation from briefing generation
+      });
+      memoryByContact.set(contactId, {
+        memories: result.memories.map((m) => m.content),
+        implications: result.implications.map((im) => im.content),
+      });
+    });
+    await Promise.all(memoryPromises);
+  } catch (error) {
+    console.error("[briefing] Memory retrieval failed (non-blocking):", error);
+    // Continue without memories — they're supplemental
+  }
+
   // Build LLM context for meeting prep and relationship arc
   if (!process.env.ANTHROPIC_API_KEY) {
     // Fallback: structured briefing without LLM
@@ -231,6 +261,16 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
         if (contactInsights.length > 0) {
           contextParts.push(`  Dynamics: ${contactInsights.map((i) => i.content.slice(0, 100)).join("; ")}`);
         }
+        // Memory graph context
+        const contactMemory = memoryByContact.get(e.contactId);
+        if (contactMemory) {
+          if (contactMemory.memories.length > 0) {
+            contextParts.push(`  From your memory graph: ${contactMemory.memories.slice(0, 3).map((m) => m.slice(0, 150)).join("; ")}`);
+          }
+          if (contactMemory.implications.length > 0) {
+            contextParts.push(`  Memory insights: ${contactMemory.implications.slice(0, 2).map((im) => im.slice(0, 150)).join("; ")}`);
+          }
+        }
       }
     }
 
@@ -296,6 +336,16 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
         }
         if (contactLoops.length > 0) {
           contextParts.push(`  Open loops: ${contactLoops.map((l) => l.content).join("; ")}`);
+        }
+        // Memory graph context for cooling contacts
+        const contactMemory = memoryByContact.get(t.contactId);
+        if (contactMemory) {
+          if (contactMemory.memories.length > 0) {
+            contextParts.push(`  From your memory graph: ${contactMemory.memories.slice(0, 3).map((m) => m.slice(0, 150)).join("; ")}`);
+          }
+          if (contactMemory.implications.length > 0) {
+            contextParts.push(`  Memory insights: ${contactMemory.implications.slice(0, 2).map((im) => im.slice(0, 150)).join("; ")}`);
+          }
         }
       }
     }

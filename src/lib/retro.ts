@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { computeTemperature } from "./temperature";
+import { retrieveMemories } from "./memory/retrieve";
 import { computeHealthScore } from "./health";
 import { computeStreaks, type ContactStreak } from "./streaks";
 
@@ -367,6 +368,58 @@ export async function generateWeeklyRetro(
 
       if (patternsReinforced.length > 0) {
         contextParts.push(`\nPATTERNS: ${patternsReinforced.join("; ")}`);
+      }
+
+      // ── Memory graph context for retro ────────────────────────────
+      try {
+        // Get unique contacts from this week's interactions
+        const weekContactIds = Array.from(thisWeekContactIds).slice(0, 5);
+        const memoryResults = await Promise.all(
+          weekContactIds.map(async (contactId) => {
+            const name = contactNameMap.get(contactId) || "Unknown";
+            const result = await retrieveMemories(userId, name, {
+              maxMemories: 3,
+              maxHops: 1,
+              contactFilter: contactId,
+              skipHebbian: true,
+            });
+            return { name, result };
+          })
+        );
+
+        const memoryParts: string[] = [];
+        for (const { name, result } of memoryResults) {
+          if (result.implications.length > 0) {
+            memoryParts.push(
+              `${name}: ${result.implications.slice(0, 2).map((im) => im.content.slice(0, 150)).join("; ")}`
+            );
+          }
+        }
+
+        if (memoryParts.length > 0) {
+          contextParts.push("\nMEMORY GRAPH INSIGHTS (longer-term patterns from your journal):");
+          for (const part of memoryParts) {
+            contextParts.push(`- ${part}`);
+          }
+        }
+
+        // Also retrieve broad trajectory/arc implications
+        const broadResult = await retrieveMemories(
+          userId,
+          "relationships patterns this week personal growth",
+          { maxMemories: 5, maxHops: 1, skipHebbian: true }
+        );
+        const broadImplications = broadResult.implications
+          .filter((im) => im.relevance >= 0.5)
+          .slice(0, 3);
+        if (broadImplications.length > 0) {
+          contextParts.push("\nBROADER PATTERNS FROM YOUR MEMORY:");
+          for (const im of broadImplications) {
+            contextParts.push(`- ${im.content.slice(0, 200)}`);
+          }
+        }
+      } catch (error) {
+        console.error("[retro] Memory retrieval failed (non-blocking):", error);
       }
 
       const contextStr = contextParts.join("\n");
