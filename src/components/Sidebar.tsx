@@ -68,6 +68,21 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+  {
+    href: "/memory/graph",
+    label: "Mem Graph",
+    mobileHidden: true,
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <circle cx="6" cy="6" r="2.5" />
+        <circle cx="18" cy="6" r="2.5" />
+        <circle cx="12" cy="18" r="2.5" />
+        <circle cx="6" cy="14" r="1.5" />
+        <circle cx="18" cy="14" r="1.5" />
+        <path strokeLinecap="round" d="M8 7l2.5 9.5M16 7l-2.5 9.5M8.5 6h7M6 8.5v4M18 8.5v4" />
+      </svg>
+    ),
+  },
 ];
 
 export default function Sidebar({
@@ -218,7 +233,7 @@ export default function Sidebar({
 
       {/* ── Mobile Bottom Nav ───────────────────────────────────── */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex md:hidden items-center justify-around bg-[var(--bg-card)] border-t border-[var(--border-subtle)] h-16 px-2 safe-area-pb">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter((item) => !item.mobileHidden).map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
