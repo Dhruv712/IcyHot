@@ -235,6 +235,54 @@ function SearchResults({ query }: { query: string }) {
         </Card>
       )}
 
+      {/* Connections */}
+      {data.connections.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle icon="🔗">Connections</CardTitle>
+          </CardHeader>
+          <div className="space-y-3">
+            {data.connections.map((conn, idx) => {
+              const memA = data.memories.find((m) => m.id === conn.fromId);
+              const memB = data.memories.find((m) => m.id === conn.toId);
+              return (
+                <div key={`${conn.fromId}-${conn.toId}-${idx}`} className="border-l-2 border-[var(--text-muted)] pl-3">
+                  {conn.reason && (
+                    <div className="text-sm text-[var(--text-primary)] leading-relaxed mb-1.5">
+                      {conn.reason}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {conn.connectionType && (
+                      <span className="text-[10px] bg-[var(--bg-elevated)] text-[var(--text-secondary)] px-2 py-0.5 rounded-lg">
+                        {CONNECTION_LABELS[conn.connectionType] || conn.connectionType}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-[var(--text-muted)]">
+                      weight: {conn.weight.toFixed(2)}
+                    </span>
+                  </div>
+                  {(memA || memB) && (
+                    <div className="mt-1.5 space-y-1">
+                      {memA && (
+                        <div className="text-[11px] text-[var(--text-muted)] truncate">
+                          → {memA.content.slice(0, 100)}
+                        </div>
+                      )}
+                      {memB && (
+                        <div className="text-[11px] text-[var(--text-muted)] truncate">
+                          → {memB.content.slice(0, 100)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       {/* Memories */}
       <div className="space-y-2">
         {data.memories.map((memory) => (
