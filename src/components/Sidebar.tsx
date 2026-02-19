@@ -55,6 +55,19 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+  {
+    href: "/memory",
+    label: "Memory",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18c-4 0-7-2.5-7-6s3-6 7-6 7 2.5 7 6" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18c2 0 3.5-2.5 3.5-6S14 6 12 6s-3.5 2.5-3.5 6 1.5 6 3.5 6z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
+        <circle cx="19" cy="12" r="2" />
+        <path strokeLinecap="round" d="M19 14v2.5" />
+      </svg>
+    ),
+  },
 ];
 
 export default function Sidebar({
