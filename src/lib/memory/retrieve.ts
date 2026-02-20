@@ -33,6 +33,7 @@ export interface RetrievedImplication {
   implicationOrder: number | null;
   strength: number;
   relevance: number; // How many of its source memories were activated
+  sourceMemoryIds: string[]; // IDs of memories that generated this implication
 }
 
 export interface RetrievedConnection {
@@ -59,6 +60,11 @@ const SEED_COUNT = 10; // Top K seeds from vector search
 const HOP_DISCOUNT = 0.5; // Each hop reduces activation by 50%
 const HEBBIAN_DELTA = 0.05; // Smaller delta for retrieval co-activation (vs 0.1 for consolidation)
 
+// Entity diversity constants
+const MAX_PER_ENTITY = 3; // Max results per contact before diversity penalty kicks in
+const OVER_REP_THRESHOLD = 0.3; // Entity in >30% of candidates = over-represented
+const DIVERSITY_WEIGHT = 0.3; // Score = 0.7 × activation + 0.3 × diversity
+
 // ── Decay function ─────────────────────────────────────────────────────
 
 function effectiveStrength(
@@ -73,6 +79,131 @@ function effectiveStrength(
   return strength * decay;
 }
 
+// ── Entity diversity reranking ─────────────────────────────────────────
+
+/**
+ * MMR-style greedy reranking that balances activation score with entity diversity.
+ * Prevents any single contact from dominating results.
+ * Memories with no contactIds (personal reflections) are never penalized.
+ */
+function diversifyByEntity<
+  T extends { contactIds: string[]; activationScore: number }
+>(candidates: T[], maxResults: number): T[] {
+  if (candidates.length <= maxResults) return candidates;
+
+  // Build entity frequency histogram
+  const entityFreq = new Map<string, number>();
+  for (const c of candidates) {
+    for (const cid of c.contactIds) {
+      entityFreq.set(cid, (entityFreq.get(cid) ?? 0) + 1);
+    }
+  }
+
+  // Find over-represented entities
+  const threshold = OVER_REP_THRESHOLD * candidates.length;
+  const overRepEntities = new Set<string>();
+  for (const [entity, count] of entityFreq) {
+    if (count > threshold) overRepEntities.add(entity);
+  }
+
+  // Fast path: no over-representation → return top N as-is
+  if (overRepEntities.size === 0) return candidates.slice(0, maxResults);
+
+  // Normalize activation scores
+  const maxActivation = candidates[0]?.activationScore ?? 1;
+
+  // Greedy MMR selection
+  const selected: T[] = [];
+  const remaining = new Set(candidates.map((_, i) => i));
+  const entityCounts = new Map<string, number>();
+
+  while (selected.length < maxResults && remaining.size > 0) {
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+
+    for (const idx of remaining) {
+      const candidate = candidates[idx];
+      const normalizedActivation =
+        maxActivation > 0 ? candidate.activationScore / maxActivation : 0;
+
+      // Compute diversity bonus
+      let diversityBonus = 1.0;
+      if (candidate.contactIds.length > 0) {
+        for (const cid of candidate.contactIds) {
+          if (overRepEntities.has(cid)) {
+            const currentCount = entityCounts.get(cid) ?? 0;
+            if (currentCount >= MAX_PER_ENTITY) {
+              diversityBonus = 0;
+              break;
+            }
+            diversityBonus = Math.min(
+              diversityBonus,
+              1.0 - currentCount / MAX_PER_ENTITY
+            );
+          }
+        }
+      }
+      // Memories with no contactIds get full diversity bonus (never penalized)
+
+      const mmrScore =
+        (1 - DIVERSITY_WEIGHT) * normalizedActivation +
+        DIVERSITY_WEIGHT * diversityBonus;
+
+      if (mmrScore > bestScore) {
+        bestScore = mmrScore;
+        bestIdx = idx;
+      }
+    }
+
+    if (bestIdx === -1) break;
+
+    const chosen = candidates[bestIdx];
+    selected.push(chosen);
+    remaining.delete(bestIdx);
+
+    // Update entity counts
+    for (const cid of chosen.contactIds) {
+      entityCounts.set(cid, (entityCounts.get(cid) ?? 0) + 1);
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Diversify implications by the entity signature of their source memories.
+ */
+function diversifyImplications(
+  implications: RetrievedImplication[],
+  activatedMap: Map<string, { contactIds: string[] }>,
+  maxResults: number
+): RetrievedImplication[] {
+  if (implications.length <= maxResults) return implications;
+
+  // Compute entity signature for each implication from its source memories
+  const withEntities = implications.map((impl) => {
+    const entities = new Set<string>();
+    for (const sid of impl.sourceMemoryIds) {
+      const mem = activatedMap.get(sid);
+      if (mem) {
+        for (const cid of mem.contactIds) entities.add(cid);
+      }
+    }
+    return {
+      impl,
+      contactIds: Array.from(entities),
+      activationScore: impl.relevance * impl.strength,
+    };
+  });
+
+  // Sort by score descending
+  withEntities.sort((a, b) => b.activationScore - a.activationScore);
+
+  // Apply same diversity logic
+  const diversified = diversifyByEntity(withEntities, maxResults);
+  return diversified.map((d) => d.impl);
+}
+
 // ── Main retrieval function ────────────────────────────────────────────
 
 export async function retrieveMemories(
@@ -84,12 +215,14 @@ export async function retrieveMemories(
     contactFilter?: string;
     minStrength?: number;
     skipHebbian?: boolean; // Skip co-activation updates (for read-only queries)
+    diversify?: boolean; // Entity diversity reranking (default true, auto-disabled with contactFilter)
   }
 ): Promise<RetrievalResult> {
   const maxMemories = options?.maxMemories ?? DEFAULT_MAX_MEMORIES;
   const maxHops = options?.maxHops ?? DEFAULT_MAX_HOPS;
   const minStrength = options?.minStrength ?? DEFAULT_MIN_STRENGTH;
   const skipHebbian = options?.skipHebbian ?? false;
+  const shouldDiversify = (options?.diversify !== false) && !options?.contactFilter;
 
   // 1. Embed the query
   const queryEmbedding = await embedSingle(query);
@@ -265,7 +398,12 @@ export async function retrieveMemories(
   const activatedIds = new Set(sortedMemories.map((m) => m.id));
 
   // 5. Collect implications whose source memories overlap with activated set
-  const implications = await findRelevantImplications(userId, activatedIds);
+  let implications = await findRelevantImplications(userId, activatedIds);
+
+  // Diversify implications by entity signature
+  if (shouldDiversify) {
+    implications = diversifyImplications(implications, activatedMap, 10);
+  }
 
   // 5b. Implication-mediated discovery — find implications semantically similar to query,
   //     then pull in their source memories even if those memories are distant in embedding space
@@ -341,6 +479,11 @@ export async function retrieveMemories(
 
         // Also add this implication to results if not already there
         if (!implications.some((i) => i.id === impl.id)) {
+          const bridgedSourceIds: string[] = JSON.parse(
+            typeof impl.sourceMemoryIds === "string"
+              ? impl.sourceMemoryIds
+              : JSON.stringify(impl.sourceMemoryIds)
+          );
           implications.push({
             id: impl.id,
             content: impl.content,
@@ -348,6 +491,7 @@ export async function retrieveMemories(
             implicationOrder: impl.implicationOrder,
             strength: impl.strength,
             relevance: impl.similarity,
+            sourceMemoryIds: bridgedSourceIds,
           });
         }
       }
@@ -371,7 +515,7 @@ export async function retrieveMemories(
   }
 
   // Combine spreading-activation memories with implication-bridged memories
-  const allResultMemories = [
+  let allResultMemories: RetrievedMemory[] = [
     ...sortedMemories.map((m) => ({
       id: m.id,
       content: m.content,
@@ -383,6 +527,14 @@ export async function retrieveMemories(
     })),
     ...implicationBridgedMemories,
   ];
+
+  // Apply entity diversity to combined results
+  if (shouldDiversify) {
+    allResultMemories = diversifyByEntity(
+      allResultMemories,
+      maxMemories + MAX_BRIDGING_IMPLICATIONS
+    );
+  }
 
   return {
     memories: allResultMemories,
@@ -490,6 +642,7 @@ async function findRelevantImplications(
       implicationOrder: impl.implicationOrder,
       strength: impl.strength,
       relevance,
+      sourceMemoryIds: sourceIds,
     });
   }
 

@@ -374,6 +374,31 @@ export const memoryImplications = pgTable("memory_implications", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const provocations = pgTable(
+  "provocations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    date: date("date").notNull(),
+    triggerContent: text("trigger_content").notNull(), // The assertion/decision that triggered this
+    triggerSource: text("trigger_source").notNull(), // "journal" | "insight"
+    provocation: text("provocation").notNull(), // The challenge text
+    supportingMemoryIds: text("supporting_memory_ids").notNull(), // JSON array of memory UUIDs
+    supportingMemoryContents: text("supporting_memory_contents").notNull(), // JSON array of content strings (for display)
+    dismissed: boolean("dismissed").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("provocations_user_date_trigger").on(
+      table.userId,
+      table.date,
+      table.triggerContent
+    ),
+  ]
+);
+
 export const memorySyncState = pgTable("memory_sync_state", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: uuid("user_id")

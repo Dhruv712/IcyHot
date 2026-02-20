@@ -7,6 +7,7 @@ import { useJournalOpenLoops, useResolveOpenLoop, useSnoozeOpenLoop } from "@/ho
 import { useDailySuggestions } from "@/hooks/useSuggestions";
 import { useHabits } from "@/hooks/useHabits";
 import { useLogInteraction } from "@/hooks/useInteractions";
+import { useDismissProvocation } from "@/hooks/useProvocations";
 import BriefingSection from "./BriefingSection";
 import type { DailyBriefingContent } from "@/lib/briefing";
 
@@ -51,6 +52,8 @@ export default function BriefingView() {
   const resolveLoop = useResolveOpenLoop();
   const snoozeLoop = useSnoozeOpenLoop();
   const [snoozeOpenId, setSnoozeOpenId] = useState<string | null>(null);
+  const dismissProvocation = useDismissProvocation();
+  const [expandedProvId, setExpandedProvId] = useState<string | null>(null);
 
   // Habits
   const { data: habitsData } = useHabits();
@@ -168,6 +171,74 @@ export default function BriefingView() {
                 </p>
               </div>
             )}
+          </div>
+        </BriefingSection>
+      )}
+
+      {/* Provocations — Your patterns are talking */}
+      {briefing?.provocations && briefing.provocations.length > 0 && (
+        <BriefingSection title="Your patterns are talking" icon="🪞">
+          <div className="space-y-3">
+            {briefing.provocations.map((prov) => (
+              <div
+                key={prov.id}
+                className="border-l-2 border-[var(--amber)]/50 bg-[var(--bg-elevated)] rounded-r-xl px-4 py-3"
+              >
+                {/* Trigger */}
+                <div className="text-xs text-[var(--text-muted)] mb-1.5">
+                  You said: &ldquo;{prov.triggerContent}&rdquo;
+                </div>
+
+                {/* Provocation text */}
+                <p className="text-sm text-[var(--text-primary)] leading-relaxed">
+                  {prov.provocation}
+                </p>
+
+                {/* Actions row */}
+                <div className="mt-2 flex items-center justify-between">
+                  {/* See evidence toggle */}
+                  {prov.supportingMemoryContents.length > 0 && (
+                    <button
+                      onClick={() =>
+                        setExpandedProvId(
+                          expandedProvId === prov.id ? null : prov.id
+                        )
+                      }
+                      className="text-[11px] text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors"
+                    >
+                      {expandedProvId === prov.id
+                        ? "Hide evidence"
+                        : "See evidence"}
+                    </button>
+                  )}
+
+                  {/* Dismiss button */}
+                  <button
+                    onClick={() => dismissProvocation.mutate(prov.id)}
+                    disabled={dismissProvocation.isPending}
+                    className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors disabled:opacity-50"
+                  >
+                    &times;
+                  </button>
+                </div>
+
+                {/* Expandable evidence */}
+                {expandedProvId === prov.id && (
+                  <div className="mt-2 space-y-1.5 border-t border-[var(--border-subtle)] pt-2">
+                    {prov.supportingMemoryContents.map(
+                      (content: string, i: number) => (
+                        <div
+                          key={i}
+                          className="text-xs text-[var(--text-secondary)] leading-relaxed italic"
+                        >
+                          &ldquo;{content}&rdquo;
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </BriefingSection>
       )}

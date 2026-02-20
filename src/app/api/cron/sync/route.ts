@@ -10,6 +10,7 @@ import { snapshotHealthScore } from "@/lib/health";
 import { generateWeeklyRetro } from "@/lib/retro";
 import { processMemories } from "@/lib/memory/pipeline";
 import { consolidateMemories } from "@/lib/memory/consolidate";
+import { generateProvocationsForUser } from "@/lib/memory/provoke";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -29,6 +30,7 @@ export async function GET(request: NextRequest) {
     calendar: { success: boolean; error?: string };
     memory: { success: boolean; error?: string };
     consolidation: { success: boolean; error?: string };
+    provocations: { success: boolean; generated?: number; error?: string };
     briefing: { success: boolean; error?: string };
     push: { success: boolean; sent?: number; error?: string };
     healthSnapshot: { success: boolean; error?: string };
@@ -42,6 +44,7 @@ export async function GET(request: NextRequest) {
       calendar: { success: false },
       memory: { success: false },
       consolidation: { success: false },
+      provocations: { success: false },
       briefing: { success: false },
       push: { success: false },
       healthSnapshot: { success: false },
@@ -88,6 +91,18 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error(`[cron] Memory consolidation failed for ${user.id}:`, error);
       result.consolidation = {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+
+    // Provocations — dialogue partner challenges using memory counter-evidence (failures don't block briefing)
+    try {
+      const provResult = await generateProvocationsForUser(user.id);
+      result.provocations = { success: true, generated: provResult.generated };
+    } catch (error) {
+      console.error(`[cron] Provocation generation failed for ${user.id}:`, error);
+      result.provocations = {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };

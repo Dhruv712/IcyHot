@@ -8,6 +8,7 @@ import {
   calendarEvents,
   calendarEventContacts,
   dailyBriefings,
+  provocations,
   groups,
   contactGroups,
 } from "@/db/schema";
@@ -44,11 +45,19 @@ interface TemperatureAlert {
   suggestion: string;
 }
 
+export interface BriefingProvocation {
+  id: string;
+  triggerContent: string;
+  provocation: string;
+  supportingMemoryContents: string[];
+}
+
 export interface DailyBriefingContent {
   todayContext: MeetingPrep[];
   patternAlerts: PatternAlert[];
   relationshipArc: RelationshipArc | null;
   temperatureAlerts: TemperatureAlert[];
+  provocations?: BriefingProvocation[];
   summary: string;
 }
 
@@ -439,11 +448,41 @@ Only include contacts that appear in the context above.`,
 
     const llmResult = JSON.parse(jsonMatch[0]);
 
+    // Query today's non-dismissed provocations
+    let todayProvocations: BriefingProvocation[] = [];
+    try {
+      const provRows = await db
+        .select({
+          id: provocations.id,
+          triggerContent: provocations.triggerContent,
+          provocation: provocations.provocation,
+          supportingMemoryContents: provocations.supportingMemoryContents,
+        })
+        .from(provocations)
+        .where(
+          and(
+            eq(provocations.userId, userId),
+            eq(provocations.date, today),
+            eq(provocations.dismissed, false)
+          )
+        );
+
+      todayProvocations = provRows.map((p) => ({
+        id: p.id,
+        triggerContent: p.triggerContent,
+        provocation: p.provocation,
+        supportingMemoryContents: JSON.parse(p.supportingMemoryContents),
+      }));
+    } catch (error) {
+      console.error("[briefing] Failed to query provocations (non-blocking):", error);
+    }
+
     const briefing: DailyBriefingContent = {
       todayContext: llmResult.todayContext || [],
       patternAlerts,
       relationshipArc: llmResult.relationshipArc || null,
       temperatureAlerts: llmResult.temperatureAlerts || temperatureAlerts,
+      provocations: todayProvocations.length > 0 ? todayProvocations : undefined,
       summary: llmResult.summary || "Here's your day at a glance.",
     };
 

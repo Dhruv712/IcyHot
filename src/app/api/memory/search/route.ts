@@ -11,12 +11,13 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { query, contactId, maxMemories, maxHops, skipHebbian } = body as {
+  const { query, contactId, maxMemories, maxHops, skipHebbian, diversify } = body as {
     query?: string;
     contactId?: string;
     maxMemories?: number;
     maxHops?: number;
     skipHebbian?: boolean;
+    diversify?: boolean;
   };
 
   if (!query || typeof query !== "string" || query.trim().length === 0) {
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
       maxHops,
       contactFilter: contactId,
       skipHebbian,
+      diversify,
     });
 
     return NextResponse.json({ success: true, ...result });
