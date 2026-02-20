@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { memories, memorySyncState } from "@/db/schema";
+import { memories, memoryConnections, memoryImplications, memorySyncState } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { processMemories } from "@/lib/memory/pipeline";
+import { consolidateMemories } from "@/lib/memory/consolidate";
 import { abstractMemory } from "@/lib/memory/abstract";
 import { embedSingle } from "@/lib/memory/embed";
 
@@ -22,14 +23,63 @@ export async function POST(request: NextRequest) {
   let reset = false;
   let clean = false;
   let abstractOnly = false;
+  let consolidationClean = false;
+  let reconsolidate = false;
   try {
     const body = await request.json();
     if (body.limit && typeof body.limit === "number") limit = body.limit;
     if (body.reset) reset = true;
     if (body.clean) clean = true;
     if (body.abstractOnly) abstractOnly = true;
+    if (body.consolidationClean) consolidationClean = true;
+    if (body.reconsolidate) reconsolidate = true;
   } catch {
     // No body or invalid JSON — use defaults
+  }
+
+  // Consolidation clean mode: wipe all connections + implications, optionally reconsolidate
+  if (consolidationClean) {
+    const deletedConnections = await db
+      .delete(memoryConnections)
+      .where(eq(memoryConnections.userId, userId))
+      .returning({ id: memoryConnections.id });
+
+    const deletedImplications = await db
+      .delete(memoryImplications)
+      .where(eq(memoryImplications.userId, userId))
+      .returning({ id: memoryImplications.id });
+
+    console.log(
+      `[backfill] Cleaned ${deletedConnections.length} connections and ${deletedImplications.length} implications for user ${userId}`
+    );
+
+    let consolidationResult = null;
+    if (reconsolidate) {
+      try {
+        consolidationResult = await consolidateMemories(userId, { timeoutMs: 240_000 });
+        console.log(`[backfill] Reconsolidation complete:`, consolidationResult);
+      } catch (error) {
+        console.error(`[backfill] Reconsolidation failed:`, error);
+        return NextResponse.json({
+          success: true,
+          consolidationClean: true,
+          deletedConnections: deletedConnections.length,
+          deletedImplications: deletedImplications.length,
+          reconsolidation: {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      consolidationClean: true,
+      deletedConnections: deletedConnections.length,
+      deletedImplications: deletedImplications.length,
+      ...(consolidationResult ? { reconsolidation: { success: true, ...consolidationResult } } : {}),
+    });
   }
 
   // Abstract-only mode: generate abstract embeddings for memories that don't have them
