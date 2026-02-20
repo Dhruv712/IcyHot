@@ -34,6 +34,14 @@ export async function POST(request: NextRequest) {
 
   // Abstract-only mode: generate abstract embeddings for memories that don't have them
   if (abstractOnly) {
+    // If reset flag is also set, clear all abstract embeddings (including zero-vectors) first
+    if (reset) {
+      await db.execute(
+        sql`UPDATE memories SET abstract_embedding = NULL WHERE user_id = ${userId}`
+      );
+      console.log(`[backfill-abstract] Reset all abstract embeddings for user ${userId}`);
+    }
+
     const batchSize = limit > 1 ? limit : 1; // use limit=30 once debugged
     const missing = await db
       .select({ id: memories.id, content: memories.content })
