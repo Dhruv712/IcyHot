@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { RetrievalResult } from "@/lib/memory/retrieve";
 
 interface MemoryStatsResponse {
@@ -97,5 +97,58 @@ export function useMemoryGraph() {
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ── Contact-specific memory hooks ────────────────────────────────────
+
+export interface ContactMemory {
+  id: string;
+  content: string;
+  sourceDate: string;
+  source: string;
+  strength: number;
+  contactIds: string[];
+}
+
+export function useContactMemories(contactId: string | null) {
+  return useQuery<ContactMemory[]>({
+    queryKey: ["contact", contactId, "memories"],
+    queryFn: async () => {
+      const res = await fetch(`/api/memories?contactId=${contactId}`);
+      if (!res.ok) throw new Error("Failed to fetch memories");
+      const data = await res.json();
+      return data.memories;
+    },
+    enabled: !!contactId,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useUpdateMemoryContacts() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      memoryId,
+      contactIds,
+    }: {
+      memoryId: string;
+      contactIds: string[] | null;
+    }) => {
+      const res = await fetch(`/api/memories/${memoryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactIds }),
+      });
+      if (!res.ok) throw new Error("Failed to update memory");
+      return res.json();
+    },
+    onSuccess: () => {
+      // Invalidate memories for ALL contacts (the memory moved between contacts)
+      queryClient.invalidateQueries({ queryKey: ["contact"] });
+      queryClient.invalidateQueries({ queryKey: ["memory-graph"] });
+      queryClient.invalidateQueries({ queryKey: ["memory-stats"] });
+    },
   });
 }

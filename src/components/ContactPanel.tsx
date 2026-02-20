@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { GraphNode } from "./graph/types";
 import { temperatureLabel } from "@/lib/temperature";
 import { formatDate } from "@/lib/utils";
@@ -10,6 +10,9 @@ import { useDeleteContact, useUpdateContact, useGenerateBio } from "@/hooks/useC
 import { useGroups, useCreateGroup } from "@/hooks/useGroups";
 import { useContactCalendarEvents, useConfirmMatch } from "@/hooks/useCalendar";
 import type { ContactCalendarEvent } from "@/hooks/useCalendar";
+import { useContactMemories, useUpdateMemoryContacts } from "@/hooks/useMemory";
+import type { ContactMemory } from "@/hooks/useMemory";
+import { useGraphData } from "@/hooks/useGraphData";
 
 interface ContactPanelProps {
   node: GraphNode;
@@ -106,6 +109,117 @@ function CalendarEventCard({
   );
 }
 
+function MemoryCard({
+  memory,
+  contactName,
+  contactId,
+  allContacts,
+  isReassigning,
+  onToggleReassign,
+  onReassign,
+  onRemove,
+}: {
+  memory: ContactMemory;
+  contactName: string;
+  contactId: string;
+  allContacts: Array<{ id: string; name: string }>;
+  isReassigning: boolean;
+  onToggleReassign: () => void;
+  onReassign: (targetContactId: string) => void;
+  onRemove: () => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const otherContacts = useMemo(
+    () =>
+      allContacts
+        .filter((c) => c.id !== contactId)
+        .filter((c) => c.name.toLowerCase().includes(filter.toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [allContacts, contactId, filter]
+  );
+
+  return (
+    <div className="bg-[var(--bg-elevated)] rounded-xl px-3 py-2 text-xs relative">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-[var(--text-secondary)] line-clamp-2 leading-relaxed">
+            {memory.content}
+          </div>
+          <div className="text-[var(--text-muted)] mt-0.5 flex items-center gap-1.5">
+            <span>
+              {new Date(memory.sourceDate + "T12:00:00").toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </span>
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[var(--bg-card)] text-[10px]">
+              {memory.source === "journal" ? "\uD83D\uDCD3" : memory.source === "calendar" ? "\uD83D\uDCC5" : "\uD83D\uDCAC"} {memory.source}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={onToggleReassign}
+          className={`flex-shrink-0 p-1 rounded-lg transition-colors ${
+            isReassigning
+              ? "text-[var(--amber)] bg-[var(--amber-ghost-bg)]"
+              : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+          }`}
+          title="Reassign to different contact"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Reassignment dropdown */}
+      {isReassigning && (
+        <div className="absolute right-0 top-full mt-1 z-20 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-xl shadow-xl py-1 min-w-[200px] max-h-[280px] flex flex-col">
+          {/* Remove option */}
+          <button
+            onClick={onRemove}
+            className="w-full text-left px-3 py-1.5 text-xs text-[var(--danger)] hover:bg-[var(--bg-card)] transition-colors"
+          >
+            Remove from {contactName}
+          </button>
+          <div className="border-t border-[var(--border-subtle)] my-1" />
+
+          {/* Filter input */}
+          <div className="px-2 pb-1">
+            <input
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search contacts..."
+              className="w-full bg-[var(--bg-card)] border border-[var(--border-medium)] rounded-lg px-2 py-1 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--amber)]"
+              autoFocus
+            />
+          </div>
+
+          {/* Contact list */}
+          <div className="overflow-y-auto flex-1">
+            {otherContacts.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => onReassign(c.id)}
+                className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-card)] transition-colors truncate"
+              >
+                {c.name}
+              </button>
+            ))}
+            {otherContacts.length === 0 && (
+              <div className="px-3 py-1.5 text-xs text-[var(--text-muted)]">
+                {filter ? "No matches" : "No other contacts"}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ContactPanel({ node, onClose, onInteractionLogged }: ContactPanelProps) {
   const [note, setNote] = useState("");
   const [sentiment, setSentiment] = useState<"great" | "good" | "neutral" | "awkward" | null>(null);
@@ -135,7 +249,10 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
     setEditing(false);
     setEditingEmail(false);
     setEditingBio(false);
+    setReassigningMemoryId(null);
   }, [node.id, node.name, node.relationshipType, node.importance, node.email, node.bio]);
+
+  const [reassigningMemoryId, setReassigningMemoryId] = useState<string | null>(null);
 
   const { data: interactions } = useContactInteractions(node.id);
   const logInteraction = useLogInteraction();
@@ -146,6 +263,13 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
   const createGroup = useCreateGroup();
   const { data: calendarEvents } = useContactCalendarEvents(node.id);
   const confirmMatch = useConfirmMatch();
+  const { data: contactMemories } = useContactMemories(node.id);
+  const updateMemoryContacts = useUpdateMemoryContacts();
+  const { data: graphData } = useGraphData();
+  const allContacts = useMemo(
+    () => (graphData?.nodes ?? []).map((n) => ({ id: n.id, name: n.name })),
+    [graphData?.nodes]
+  );
 
   const now = new Date();
   const upcomingEvents = calendarEvents?.filter((e) => new Date(e.eventStart) > now) ?? [];
@@ -648,6 +772,54 @@ export default function ContactPanel({ node, onClose, onInteractionLogged }: Con
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Memories */}
+        {contactMemories && contactMemories.length > 0 && (
+          <div className="p-5 border-b border-[var(--border-subtle)]">
+            <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
+              <span>{"\uD83E\uDDE0"} Memories</span>
+              <span className="bg-[var(--bg-elevated)] text-[var(--text-muted)] text-[10px] px-1.5 py-0.5 rounded-full font-normal">
+                {contactMemories.length}
+              </span>
+            </h3>
+            <div className="space-y-1.5">
+              {contactMemories.map((memory) => (
+                <MemoryCard
+                  key={memory.id}
+                  memory={memory}
+                  contactName={node.name}
+                  contactId={node.id}
+                  allContacts={allContacts}
+                  isReassigning={reassigningMemoryId === memory.id}
+                  onToggleReassign={() =>
+                    setReassigningMemoryId(
+                      reassigningMemoryId === memory.id ? null : memory.id
+                    )
+                  }
+                  onReassign={(targetContactId) => {
+                    const newContactIds = memory.contactIds
+                      .filter((id) => id !== node.id)
+                      .concat(targetContactId);
+                    updateMemoryContacts.mutate(
+                      { memoryId: memory.id, contactIds: [...new Set(newContactIds)] },
+                      { onSuccess: () => setReassigningMemoryId(null) }
+                    );
+                  }}
+                  onRemove={() => {
+                    const newContactIds = memory.contactIds.filter((id) => id !== node.id);
+                    updateMemoryContacts.mutate(
+                      {
+                        memoryId: memory.id,
+                        contactIds: newContactIds.length > 0 ? newContactIds : null,
+                      },
+                      { onSuccess: () => setReassigningMemoryId(null) }
+                    );
+                  }}
+                />
+              ))}
             </div>
           </div>
         )}
