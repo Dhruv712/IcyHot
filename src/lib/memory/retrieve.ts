@@ -23,6 +23,7 @@ export interface RetrievedMemory {
   contactIds: string[];
   sourceDate: string;
   hop: number; // 0 = seed (direct match), 1 = hop 1, 2 = hop 2
+  viaImplication?: string; // If discovered through implication-mediated retrieval, the bridging implication content
 }
 
 export interface RetrievedImplication {
@@ -266,6 +267,99 @@ export async function retrieveMemories(
   // 5. Collect implications whose source memories overlap with activated set
   const implications = await findRelevantImplications(userId, activatedIds);
 
+  // 5b. Implication-mediated discovery — find implications semantically similar to query,
+  //     then pull in their source memories even if those memories are distant in embedding space
+  const implicationBridgedMemories: Array<{
+    id: string;
+    content: string;
+    strength: number;
+    activationScore: number;
+    contactIds: string[];
+    sourceDate: string;
+    hop: number;
+    viaImplication: string;
+  }> = [];
+
+  try {
+    const queryImplications = await findImplicationsByQuery(
+      userId,
+      queryEmbedding,
+      activatedIds
+    );
+
+    for (const impl of queryImplications) {
+      const sourceIds: string[] = JSON.parse(
+        typeof impl.sourceMemoryIds === "string"
+          ? impl.sourceMemoryIds
+          : JSON.stringify(impl.sourceMemoryIds)
+      );
+
+      for (const sourceId of sourceIds) {
+        if (activatedIds.has(sourceId)) continue; // Already in results
+
+        // Fetch the bridged memory
+        const bridgedRows = await db
+          .select({
+            id: memories.id,
+            content: memories.content,
+            strength: memories.strength,
+            contactIds: memories.contactIds,
+            sourceDate: memories.sourceDate,
+            lastActivatedAt: memories.lastActivatedAt,
+          })
+          .from(memories)
+          .where(eq(memories.id, sourceId))
+          .limit(1);
+
+        if (bridgedRows.length === 0) continue;
+
+        const bridged = bridgedRows[0];
+        const connCount = connectionCounts.get(sourceId) ?? 0;
+        const decayedStrength = effectiveStrength(
+          bridged.strength,
+          bridged.lastActivatedAt,
+          connCount
+        );
+
+        if (decayedStrength < minStrength) continue;
+
+        const activationScore = impl.similarity * decayedStrength * 0.3; // 0.3x discount for implication-bridged
+
+        activatedIds.add(sourceId);
+        implicationBridgedMemories.push({
+          id: bridged.id,
+          content: bridged.content,
+          strength: decayedStrength,
+          activationScore,
+          contactIds: bridged.contactIds
+            ? JSON.parse(bridged.contactIds)
+            : [],
+          sourceDate: bridged.sourceDate,
+          hop: -1, // Special marker for implication-bridged
+          viaImplication: impl.content,
+        });
+
+        // Also add this implication to results if not already there
+        if (!implications.some((i) => i.id === impl.id)) {
+          implications.push({
+            id: impl.id,
+            content: impl.content,
+            implicationType: impl.implicationType,
+            implicationOrder: impl.implicationOrder,
+            strength: impl.strength,
+            relevance: impl.similarity,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error(
+      `[retrieve] Implication-mediated discovery failed:`,
+      error
+    );
+    // Non-blocking — continue without bridged memories
+  }
+
   // 6. Filter connections to only include those between activated memories
   const relevantConnections = allConnections.filter(
     (c) => activatedIds.has(c.fromId) && activatedIds.has(c.toId)
@@ -276,8 +370,9 @@ export async function retrieveMemories(
     await applyHebbianCoActivation(activatedIds, relevantConnections);
   }
 
-  return {
-    memories: sortedMemories.map((m) => ({
+  // Combine spreading-activation memories with implication-bridged memories
+  const allResultMemories = [
+    ...sortedMemories.map((m) => ({
       id: m.id,
       content: m.content,
       strength: m.strength,
@@ -286,6 +381,11 @@ export async function retrieveMemories(
       sourceDate: m.sourceDate,
       hop: m.hop,
     })),
+    ...implicationBridgedMemories,
+  ];
+
+  return {
+    memories: allResultMemories,
     implications,
     connections: relevantConnections,
     query,
@@ -439,4 +539,62 @@ async function applyHebbianCoActivation(
         sql`${memories.id} IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`
       );
   }
+}
+
+// ── Helper: find implications by query embedding (implication-mediated discovery) ─
+
+const IMPLICATION_QUERY_THRESHOLD = 0.5;
+const MAX_BRIDGING_IMPLICATIONS = 5;
+
+async function findImplicationsByQuery(
+  userId: string,
+  queryEmbedding: number[],
+  alreadyActivated: Set<string>
+): Promise<
+  Array<{
+    id: string;
+    content: string;
+    implicationType: string | null;
+    implicationOrder: number | null;
+    strength: number;
+    similarity: number;
+    sourceMemoryIds: string;
+  }>
+> {
+  const rows = await db.execute(sql`
+    SELECT id, content, implication_type, implication_order, strength, source_memory_ids,
+      1 - (embedding <=> ${sql.raw(`'[${queryEmbedding.join(",")}]'`)}::vector) as similarity
+    FROM memory_implications
+    WHERE user_id = ${userId}
+      AND embedding IS NOT NULL
+      AND 1 - (embedding <=> ${sql.raw(`'[${queryEmbedding.join(",")}]'`)}::vector) > ${IMPLICATION_QUERY_THRESHOLD}
+    ORDER BY similarity DESC
+    LIMIT ${MAX_BRIDGING_IMPLICATIONS * 2}
+  `);
+
+  const results = (
+    rows.rows as Array<{
+      id: string;
+      content: string;
+      implication_type: string | null;
+      implication_order: number | null;
+      strength: number;
+      source_memory_ids: string;
+      similarity: number;
+    }>
+  ).filter((row) => {
+    // Only include implications that have at least one source memory NOT already activated
+    const sourceIds: string[] = JSON.parse(row.source_memory_ids);
+    return sourceIds.some((id) => !alreadyActivated.has(id));
+  });
+
+  return results.slice(0, MAX_BRIDGING_IMPLICATIONS).map((row) => ({
+    id: row.id,
+    content: row.content,
+    implicationType: row.implication_type,
+    implicationOrder: row.implication_order,
+    strength: row.strength,
+    similarity: row.similarity,
+    sourceMemoryIds: row.source_memory_ids,
+  }));
 }

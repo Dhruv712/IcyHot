@@ -324,6 +324,7 @@ export const memories = pgTable(
       .notNull(),
     content: text("content").notNull(),
     embedding: vector("embedding", { dimensions: 1024 }), // Voyage voyage-3
+    abstractEmbedding: vector("abstract_embedding", { dimensions: 1024 }), // Abstract/structural embedding (names/dates stripped)
     source: text("source").notNull(), // "journal" | "calendar" | "interaction"
     sourceDate: date("source_date").notNull(),
     contactIds: text("contact_ids"), // JSON array of related contact UUIDs

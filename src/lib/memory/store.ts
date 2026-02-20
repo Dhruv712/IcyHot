@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { memories } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { embedTexts } from "./embed";
+import { generateAbstractEmbedding } from "./abstract";
 import type { ExtractedMemory } from "./extract";
 
 const SIMILARITY_THRESHOLD = 0.92;
@@ -102,16 +103,41 @@ async function storeOneMemory(
   const contactIds = resolveContactIds(memory.contactNames, contacts);
 
   // Insert new memory
-  await db.insert(memories).values({
-    userId,
-    content: memory.content,
-    embedding,
-    source: "journal",
-    sourceDate: entryDate,
-    contactIds: contactIds.length > 0 ? JSON.stringify(contactIds) : null,
-    strength: memory.significance === "high" ? 1.5 : memory.significance === "medium" ? 1.0 : 0.7,
-    activationCount: 1,
-    lastActivatedAt: new Date(),
+  const [inserted] = await db
+    .insert(memories)
+    .values({
+      userId,
+      content: memory.content,
+      embedding,
+      source: "journal",
+      sourceDate: entryDate,
+      contactIds: contactIds.length > 0 ? JSON.stringify(contactIds) : null,
+      strength:
+        memory.significance === "high"
+          ? 1.5
+          : memory.significance === "medium"
+            ? 1.0
+            : 0.7,
+      activationCount: 1,
+      lastActivatedAt: new Date(),
+    })
+    .returning({ id: memories.id });
+
+  // Fire-and-forget: generate abstract embedding (non-blocking)
+  generateAbstractEmbedding(memory.content).then((abstractEmb) => {
+    if (abstractEmb && inserted) {
+      db.update(memories)
+        .set({ abstractEmbedding: abstractEmb })
+        .where(eq(memories.id, inserted.id))
+        .then(() =>
+          console.log(
+            `[memory-store] Abstract embedding saved for "${memory.content.slice(0, 40)}..."`
+          )
+        )
+        .catch((err) =>
+          console.error(`[memory-store] Failed to save abstract embedding:`, err)
+        );
+    }
   });
 
   return "created";

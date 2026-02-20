@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { memories, memorySyncState } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { processMemories } from "@/lib/memory/pipeline";
+import { generateAbstractEmbedding } from "@/lib/memory/abstract";
 
 export const maxDuration = 300; // Vercel Hobby with fluid compute allows up to 300s
 
@@ -19,13 +20,69 @@ export async function POST(request: NextRequest) {
   let limit = 1;
   let reset = false;
   let clean = false;
+  let abstractOnly = false;
   try {
     const body = await request.json();
     if (body.limit && typeof body.limit === "number") limit = body.limit;
     if (body.reset) reset = true;
     if (body.clean) clean = true;
+    if (body.abstractOnly) abstractOnly = true;
   } catch {
     // No body or invalid JSON — use defaults
+  }
+
+  // Abstract-only mode: generate abstract embeddings for memories that don't have them
+  if (abstractOnly) {
+    const batchSize = limit || 10;
+    const missing = await db
+      .select({ id: memories.id, content: memories.content })
+      .from(memories)
+      .where(
+        sql`${memories.userId} = ${userId} AND ${memories.abstractEmbedding} IS NULL AND ${memories.embedding} IS NOT NULL`
+      )
+      .limit(batchSize);
+
+    let processed = 0;
+    let failed = 0;
+
+    // Process in serial batches of 3 to avoid rate limits
+    for (let i = 0; i < missing.length; i += 3) {
+      const batch = missing.slice(i, i + 3);
+      const results = await Promise.allSettled(
+        batch.map(async (mem) => {
+          const abstractEmb = await generateAbstractEmbedding(mem.content);
+          if (abstractEmb) {
+            await db
+              .update(memories)
+              .set({ abstractEmbedding: abstractEmb })
+              .where(eq(memories.id, mem.id));
+            return true;
+          }
+          return false;
+        })
+      );
+
+      for (const r of results) {
+        if (r.status === "fulfilled" && r.value) processed++;
+        else failed++;
+      }
+    }
+
+    const remaining = await db.execute(
+      sql`SELECT COUNT(*) as count FROM memories WHERE user_id = ${userId} AND abstract_embedding IS NULL AND embedding IS NOT NULL`
+    );
+    const remainingCount = parseInt(
+      (remaining.rows[0] as { count: string }).count,
+      10
+    );
+
+    return NextResponse.json({
+      success: true,
+      abstractOnly: true,
+      processed,
+      failed,
+      remaining: remainingCount,
+    });
   }
 
   // If clean, delete ALL existing memories for this user

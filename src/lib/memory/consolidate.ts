@@ -33,6 +33,7 @@ interface LLMImplication {
 
 interface ConsolidationResult {
   clustersProcessed: number;
+  antiClustersProcessed: number;
   connectionsCreated: number;
   connectionsStrengthened: number;
   implicationsCreated: number;
@@ -56,6 +57,7 @@ export async function consolidateMemories(
   const timeoutMs = options?.timeoutMs ?? 90_000;
   const result: ConsolidationResult = {
     clustersProcessed: 0,
+    antiClustersProcessed: 0,
     connectionsCreated: 0,
     connectionsStrengthened: 0,
     implicationsCreated: 0,
@@ -132,8 +134,47 @@ export async function consolidateMemories(
     }
   }
 
+  // 5. Anti-clustering pass — discover cross-domain connections
+  try {
+    const antiClusters = await findAntiClusters(userId, allMemories);
+    console.log(`[consolidate] Found ${antiClusters.length} anti-clusters`);
+
+    for (const cluster of antiClusters) {
+      try {
+        const llmResult = await analyzeCluster(
+          cluster,
+          allContacts,
+          timeoutMs,
+          true // isAntiCluster
+        );
+        if (!llmResult) continue;
+
+        for (const conn of llmResult.connections) {
+          const stored = await storeConnection(userId, conn);
+          if (stored === "created") result.connectionsCreated++;
+          else if (stored === "strengthened") result.connectionsStrengthened++;
+        }
+
+        for (const impl of llmResult.implications) {
+          const stored = await storeImplication(userId, impl);
+          if (stored === "created") result.implicationsCreated++;
+          else if (stored === "reinforced") result.implicationsReinforced++;
+        }
+
+        result.antiClustersProcessed++;
+        console.log(
+          `[consolidate] Anti-cluster ${result.antiClustersProcessed}: ${llmResult.connections.length} connections, ${llmResult.implications.length} implications`
+        );
+      } catch (error) {
+        console.error(`[consolidate] Anti-cluster analysis failed:`, error);
+      }
+    }
+  } catch (error) {
+    console.error(`[consolidate] Anti-clustering pass failed:`, error);
+  }
+
   console.log(
-    `[consolidate] Done: ${result.clustersProcessed} clusters, ${result.connectionsCreated} new connections, ${result.connectionsStrengthened} strengthened, ${result.implicationsCreated} new implications, ${result.implicationsReinforced} reinforced`
+    `[consolidate] Done: ${result.clustersProcessed} clusters, ${result.antiClustersProcessed} anti-clusters, ${result.connectionsCreated} new connections, ${result.connectionsStrengthened} strengthened, ${result.implicationsCreated} new implications, ${result.implicationsReinforced} reinforced`
   );
 
   return result;
@@ -211,12 +252,99 @@ async function findSemanticClusters(
   return clusters;
 }
 
+// ── Anti-clustering: find structurally similar but surface-dissimilar memories ─
+
+const ANTI_CLUSTER_MAX_SURFACE_SIM = 0.35; // Must be far apart in raw embedding space
+const ANTI_CLUSTER_MIN_ABSTRACT_SIM = 0.55; // But close in abstract embedding space
+const ANTI_CLUSTER_SEEDS = 5;
+const ANTI_CLUSTER_NEIGHBORS = 5;
+
+async function findAntiClusters(
+  userId: string,
+  allMemories: MemoryRef[]
+): Promise<MemoryRef[][]> {
+  // Check if we have any abstract embeddings to work with
+  const abstractCount = await db.execute(sql`
+    SELECT COUNT(*) as count FROM memories
+    WHERE user_id = ${userId} AND abstract_embedding IS NOT NULL
+  `);
+  const hasAbstracts =
+    parseInt((abstractCount.rows[0] as { count: string }).count, 10) >= 10;
+
+  if (!hasAbstracts) {
+    console.log(
+      `[consolidate] Skipping anti-clustering — not enough abstract embeddings`
+    );
+    return [];
+  }
+
+  // Pick random seed memories (not the top-strength ones — we want diversity)
+  const shuffled = [...allMemories].sort(() => Math.random() - 0.5);
+  const seeds = shuffled.slice(0, ANTI_CLUSTER_SEEDS);
+
+  const antiClusters: MemoryRef[][] = [];
+  const usedIds = new Set<string>();
+
+  for (const seed of seeds) {
+    if (usedIds.has(seed.id)) continue;
+
+    // Find memories that are FAR in raw embedding space but CLOSE in abstract embedding space
+    const neighbors = await db.execute(sql`
+      SELECT id, content, source_date, strength, activation_count,
+        1 - (embedding <=> (SELECT embedding FROM memories WHERE id = ${seed.id})) as raw_sim,
+        1 - (abstract_embedding <=> (SELECT abstract_embedding FROM memories WHERE id = ${seed.id})) as abstract_sim
+      FROM memories
+      WHERE user_id = ${userId}
+        AND embedding IS NOT NULL
+        AND abstract_embedding IS NOT NULL
+        AND id != ${seed.id}
+        AND 1 - (embedding <=> (SELECT embedding FROM memories WHERE id = ${seed.id})) < ${ANTI_CLUSTER_MAX_SURFACE_SIM}
+        AND 1 - (abstract_embedding <=> (SELECT abstract_embedding FROM memories WHERE id = ${seed.id})) > ${ANTI_CLUSTER_MIN_ABSTRACT_SIM}
+      ORDER BY abstract_sim DESC
+      LIMIT ${ANTI_CLUSTER_NEIGHBORS}
+    `);
+
+    const neighborRows = neighbors.rows as Array<{
+      id: string;
+      content: string;
+      source_date: string;
+      strength: number;
+      activation_count: number;
+      raw_sim: number;
+      abstract_sim: number;
+    }>;
+
+    if (neighborRows.length < 2) continue; // Need at least 2 neighbors + seed = 3
+
+    const cluster: MemoryRef[] = [seed];
+    for (const row of neighborRows) {
+      if (!usedIds.has(row.id)) {
+        cluster.push({
+          id: row.id,
+          content: row.content,
+          sourceDate: row.source_date,
+          strength: row.strength,
+          activationCount: row.activation_count,
+        });
+      }
+    }
+
+    if (cluster.length >= 3) {
+      antiClusters.push(cluster);
+      for (const m of cluster) usedIds.add(m.id);
+    }
+  }
+
+  return antiClusters;
+}
+
 // ── LLM analysis ──────────────────────────────────────────────────
 
 async function analyzeCluster(
   cluster: MemoryRef[],
   allContacts: { id: string; name: string }[],
-  timeoutMs: number
+  timeoutMs: number,
+  isAntiCluster = false
 ): Promise<{ connections: LLMConnection[]; implications: LLMImplication[] } | null> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.error("[consolidate] ANTHROPIC_API_KEY is not set!");
@@ -235,13 +363,28 @@ async function analyzeCluster(
     .map((m) => `[${m.id}] ${m.sourceDate} — ${m.content}`)
     .join("\n");
 
-  const prompt = `You are analyzing a set of memories from Dhruv's personal memory system to discover connections between memories and derive implications from them. These memories were identified as semantically related but may span different dates and contexts.
+  const antiClusterPreamble = isAntiCluster
+    ? `
+
+## IMPORTANT: CROSS-DOMAIN ANALYSIS MODE
+These memories were deliberately selected because they appear UNRELATED on the surface but share deeper structural or emotional similarities. Your primary job is to find the NON-OBVIOUS connections — the shared patterns across different life domains, people, and timeframes. Look especially for:
+- Cross-domain analogies (the same behavioral pattern manifesting in different life areas)
+- Shared emotional undercurrents across seemingly unrelated events
+- Behavioral patterns that look different on the surface but have the same underlying structure
+- Contradictions or tensions that only become visible when you juxtapose distant memories
+- The same coping mechanism, relational dynamic, or decision-making pattern recurring in different contexts
+
+Do NOT just say "these are unrelated." Dig deeper — the structural similarity is there.
+`
+    : "";
+
+  const prompt = `You are analyzing a set of memories from Dhruv's personal memory system to discover connections between memories and derive implications from them.${isAntiCluster ? " These memories appear unrelated on the surface but may share deeper structural patterns." : " These memories were identified as semantically related but may span different dates and contexts."}
 
 Use "you" (second person) when referring to Dhruv — never say "the user" or "Dhruv."
 
 Known contacts (for reference):
 ${contactListStr}
-
+${antiClusterPreamble}
 ## Memories to analyze:
 ${memoriesFormatted}
 (Each memory shows: [ID] date — content)

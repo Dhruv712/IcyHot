@@ -308,7 +308,18 @@ function SearchResults({ query }: { query: string }) {
                   hop {memory.hop}
                 </span>
               )}
+              {(memory as { viaImplication?: string }).viaImplication && (
+                <span className="bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded-lg font-medium">
+                  via implication
+                </span>
+              )}
             </div>
+            {(memory as { viaImplication?: string }).viaImplication && (
+              <div className="mt-1.5 text-[11px] text-purple-400/70 italic leading-relaxed">
+                Bridged by: {(memory as { viaImplication?: string }).viaImplication!.slice(0, 120)}
+                {(memory as { viaImplication?: string }).viaImplication!.length > 120 ? "..." : ""}
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -105,7 +105,10 @@ const CONNECTION_TYPE_COLORS: Record<string, string> = {
 };
 
 const LERP_SPEED = 0.08;
-const PADDING = 60; // px padding from edges in UMAP mode
+const PADDING = 60;
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 5.0;
+const ZOOM_STEP = 0.15;
 
 // ── Component ──────────────────────────────────────────────────────────
 
@@ -127,6 +130,12 @@ export default function MemoryForceGraph({
   const selectedRef = useRef<MemNode | null>(null);
   const viewModeRef = useRef(viewMode);
   const isTransitioning = useRef(false);
+
+  // Viewport (zoom/pan)
+  const vpRef = useRef({ x: 0, y: 0, scale: 1 });
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef({ x: 0, y: 0, vpX: 0, vpY: 0 });
+
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [dpr, setDpr] = useState(1);
   const [tooltip, setTooltip] = useState<{
@@ -138,6 +147,18 @@ export default function MemoryForceGraph({
   // Keep refs in sync
   selectedRef.current = selectedNode as MemNode | null;
   viewModeRef.current = viewMode;
+
+  // ── Screen-to-world conversion ──────────────────────────────────────
+
+  const screenToWorld = useCallback((sx: number, sy: number) => {
+    const vp = vpRef.current;
+    return [(sx - vp.x) / vp.scale, (sy - vp.y) / vp.scale] as const;
+  }, []);
+
+  const worldToScreen = useCallback((wx: number, wy: number) => {
+    const vp = vpRef.current;
+    return [wx * vp.scale + vp.x, wy * vp.scale + vp.y] as const;
+  }, []);
 
   // ── Resize observer ────────────────────────────────────────────────
 
@@ -161,9 +182,11 @@ export default function MemoryForceGraph({
 
     const { width, height } = dimensions;
 
-    // Build node array with runtime properties
     const nodes: MemNode[] = rawNodes.map((n) => {
-      const baseRadius = Math.max(4, 3 + n.connectionCount * 0.8 + n.strength * 2);
+      const baseRadius = Math.max(
+        4,
+        3 + n.connectionCount * 0.8 + n.strength * 2
+      );
       return {
         ...n,
         nodeRadius: Math.min(baseRadius, 18),
@@ -175,7 +198,6 @@ export default function MemoryForceGraph({
       };
     });
 
-    // Build edge array (d3 will resolve source/target strings to objects)
     const edges: MemEdge[] = rawEdges
       .filter(
         (e) =>
@@ -187,7 +209,6 @@ export default function MemoryForceGraph({
     nodesRef.current = nodes;
     edgesRef.current = edges;
 
-    // Create force simulation
     const sim = forceSimulation<MemNode>(nodes)
       .force(
         "link",
@@ -201,9 +222,12 @@ export default function MemoryForceGraph({
       .force("collide", forceCollide<MemNode>((d) => d.nodeRadius + 2))
       .alphaDecay(0.015)
       .velocityDecay(0.55)
-      .on("tick", () => {}); // Need at least empty handler
+      .on("tick", () => {});
 
     simRef.current = sim;
+
+    // Reset viewport on new data
+    vpRef.current = { x: 0, y: 0, scale: 1 };
 
     return () => {
       sim.stop();
@@ -212,7 +236,7 @@ export default function MemoryForceGraph({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawNodes, rawEdges, dimensions.width, dimensions.height]);
 
-  // ── Handle view mode changes (transition to/from UMAP) ──────────
+  // ── Handle view mode changes ────────────────────────────────────────
 
   useEffect(() => {
     const nodes = nodesRef.current;
@@ -222,19 +246,16 @@ export default function MemoryForceGraph({
     const { width, height } = dimensions;
 
     if (viewMode === "semantic") {
-      // Set UMAP target positions
       for (const node of nodes) {
         node.targetX = PADDING + node.ux * (width - 2 * PADDING);
         node.targetY = PADDING + node.uy * (height - 2 * PADDING);
       }
-      // Disable forces — we'll lerp to UMAP positions
       sim.force("link", null);
       sim.force("charge", null);
       sim.force("center", null);
       sim.alpha(0.3).restart();
       isTransitioning.current = true;
     } else {
-      // Restore forces
       const edges = edgesRef.current;
       sim
         .force(
@@ -247,7 +268,6 @@ export default function MemoryForceGraph({
         .force("charge", forceManyBody().strength(-40))
         .force("center", forceCenter(width / 2, height / 2));
 
-      // Unpin all nodes
       for (const node of nodes) {
         node.fx = null;
         node.fy = null;
@@ -257,52 +277,117 @@ export default function MemoryForceGraph({
       sim.alpha(0.5).restart();
       isTransitioning.current = true;
     }
+
+    // Reset viewport on mode change
+    vpRef.current = { x: 0, y: 0, scale: 1 };
   }, [viewMode, dimensions]);
 
-  // ── Hit test utility ────────────────────────────────────────────────
+  // ── Hit test utility (viewport-aware) ────────────────────────────────
 
   const getNodeAtPoint = useCallback(
-    (mx: number, my: number): MemNode | null => {
+    (screenX: number, screenY: number): MemNode | null => {
+      const [wx, wy] = screenToWorld(screenX, screenY);
       const nodes = nodesRef.current;
       for (let i = nodes.length - 1; i >= 0; i--) {
         const n = nodes[i];
         if (n.x == null || n.y == null) continue;
-        const dx = mx - n.x;
-        const dy = my - n.y;
+        const dx = wx - n.x;
+        const dy = wy - n.y;
         if (dx * dx + dy * dy < (n.nodeRadius + 4) ** 2) {
           return n;
         }
       }
       return null;
     },
-    []
+    [screenToWorld]
   );
 
-  // ── Mouse interactions ──────────────────────────────────────────────
+  // ── Mouse interactions (viewport-aware) ──────────────────────────────
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Hover
+    // Wheel → zoom toward cursor
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const vp = vpRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      const factor = e.deltaY > 0 ? 1 - ZOOM_STEP : 1 + ZOOM_STEP;
+      const newScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.scale * factor));
+
+      // Zoom toward cursor: keep point under cursor stationary
+      vp.x = mx - (mx - vp.x) * (newScale / vp.scale);
+      vp.y = my - (my - vp.y) * (newScale / vp.scale);
+      vp.scale = newScale;
+    };
+
+    // Mousedown → start pan if no node hit
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return; // Left button only
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      const node = getNodeAtPoint(mx, my);
+      if (!node) {
+        // Start panning
+        isPanningRef.current = true;
+        panStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          vpX: vpRef.current.x,
+          vpY: vpRef.current.y,
+        };
+        canvas.style.cursor = "grabbing";
+      }
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      const node = getNodeAtPoint(mx, my);
 
+      if (isPanningRef.current) {
+        const dx = e.clientX - panStartRef.current.x;
+        const dy = e.clientY - panStartRef.current.y;
+        vpRef.current.x = panStartRef.current.vpX + dx;
+        vpRef.current.y = panStartRef.current.vpY + dy;
+        setTooltip(null);
+        return;
+      }
+
+      const node = getNodeAtPoint(mx, my);
       hoveredRef.current = node;
-      canvas.style.cursor = node ? "pointer" : "default";
+      canvas.style.cursor = node ? "pointer" : "grab";
 
       if (node && node.x != null && node.y != null) {
-        setTooltip({ x: node.x, y: node.y, node });
+        const [sx, sy] = worldToScreen(node.x, node.y);
+        setTooltip({ x: sx, y: sy, node });
       } else {
         setTooltip(null);
       }
     };
 
-    // Click
+    const handleMouseUp = (e: MouseEvent) => {
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        canvas.style.cursor = "grab";
+        // If mouse barely moved, treat as click on empty space → deselect
+        const dx = e.clientX - panStartRef.current.x;
+        const dy = e.clientY - panStartRef.current.y;
+        if (Math.abs(dx) < 3 && Math.abs(dy) < 3) {
+          onSelectNode(null);
+        }
+        return;
+      }
+    };
+
     const handleClick = (e: MouseEvent) => {
+      if (isPanningRef.current) return;
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
@@ -310,21 +395,25 @@ export default function MemoryForceGraph({
 
       if (node) {
         onSelectNode(node.id === selectedRef.current?.id ? null : node);
-      } else {
-        onSelectNode(null);
       }
     };
 
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
     canvas.addEventListener("click", handleClick);
 
     return () => {
+      canvas.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseup", handleMouseUp);
       canvas.removeEventListener("click", handleClick);
     };
-  }, [getNodeAtPoint, onSelectNode]);
+  }, [getNodeAtPoint, onSelectNode, worldToScreen]);
 
-  // ── D3 drag ─────────────────────────────────────────────────────────
+  // ── D3 drag (for nodes) ─────────────────────────────────────────────
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -345,15 +434,16 @@ export default function MemoryForceGraph({
       })
       .on("drag", (event) => {
         const node = event.subject as MemNode;
-        node.fx = event.x;
-        node.fy = event.y;
+        // Convert screen coords to world coords for drag
+        const [wx, wy] = screenToWorld(event.x, event.y);
+        node.fx = wx;
+        node.fy = wy;
       })
       .on("end", (event) => {
         const sim = simRef.current;
         if (!sim) return;
         if (!event.active) sim.alphaTarget(0);
         const node = event.subject as MemNode;
-        // In semantic mode, keep pinned. In graph mode, release.
         if (viewModeRef.current === "graph") {
           node.fx = null;
           node.fy = null;
@@ -365,7 +455,7 @@ export default function MemoryForceGraph({
     return () => {
       select(canvas).on(".drag", null);
     };
-  }, [getNodeAtPoint]);
+  }, [getNodeAtPoint, screenToWorld]);
 
   // ── Escape key ──────────────────────────────────────────────────────
 
@@ -377,6 +467,34 @@ export default function MemoryForceGraph({
     return () => window.removeEventListener("keydown", handleKey);
   }, [onSelectNode]);
 
+  // ── Zoom helpers ────────────────────────────────────────────────────
+
+  const zoomIn = useCallback(() => {
+    const vp = vpRef.current;
+    const { width, height } = dimensions;
+    const cx = width / 2;
+    const cy = height / 2;
+    const newScale = Math.min(MAX_ZOOM, vp.scale * (1 + ZOOM_STEP));
+    vp.x = cx - (cx - vp.x) * (newScale / vp.scale);
+    vp.y = cy - (cy - vp.y) * (newScale / vp.scale);
+    vp.scale = newScale;
+  }, [dimensions]);
+
+  const zoomOut = useCallback(() => {
+    const vp = vpRef.current;
+    const { width, height } = dimensions;
+    const cx = width / 2;
+    const cy = height / 2;
+    const newScale = Math.max(MIN_ZOOM, vp.scale * (1 - ZOOM_STEP));
+    vp.x = cx - (cx - vp.x) * (newScale / vp.scale);
+    vp.y = cy - (cy - vp.y) * (newScale / vp.scale);
+    vp.scale = newScale;
+  }, [dimensions]);
+
+  const resetView = useCallback(() => {
+    vpRef.current = { x: 0, y: 0, scale: 1 };
+  }, []);
+
   // ── RAF loop ────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -386,7 +504,6 @@ export default function MemoryForceGraph({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Set up HiDPI canvas
     canvas.width = dimensions.width * dpr;
     canvas.height = dimensions.height * dpr;
     canvas.style.width = dimensions.width + "px";
@@ -402,12 +519,12 @@ export default function MemoryForceGraph({
       const selected = selectedRef.current;
       const hovered = hoveredRef.current;
       const currentMode = viewModeRef.current;
+      const vp = vpRef.current;
 
       // Manual tick + UMAP lerp
       if (sim) {
         sim.tick();
 
-        // In semantic mode, lerp toward UMAP positions
         if (currentMode === "semantic") {
           let settled = true;
           for (const node of nodes) {
@@ -421,7 +538,6 @@ export default function MemoryForceGraph({
               node.y = (node.y ?? 0) + dy * LERP_SPEED;
               node.fx = node.x;
               node.fy = node.y;
-              // Zero velocity so forces don't fight
               node.vx = 0;
               node.vy = 0;
             }
@@ -430,18 +546,22 @@ export default function MemoryForceGraph({
         }
       }
 
-      // ── Clear + transform ──
+      // ── Clear + DPR transform ──
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      // ── Background ──
+      // ── Background (always drawn at identity) ──
       ctx.fillStyle = "rgb(17, 17, 17)";
       ctx.fillRect(0, 0, width, height);
+
+      // ── Apply viewport transform ──
+      ctx.translate(vp.x, vp.y);
+      ctx.scale(vp.scale, vp.scale);
 
       // Subtle grid in semantic mode
       if (currentMode === "semantic") {
         ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
-        ctx.lineWidth = 0.5;
+        ctx.lineWidth = 0.5 / vp.scale;
         const gridSize = 60;
         for (let gx = PADDING; gx < width - PADDING; gx += gridSize) {
           ctx.beginPath();
@@ -464,8 +584,7 @@ export default function MemoryForceGraph({
         if (s.x == null || s.y == null || t.x == null || t.y == null) continue;
 
         const isHighlighted =
-          selected &&
-          (s.id === selected.id || t.id === selected.id);
+          selected && (s.id === selected.id || t.id === selected.id);
 
         const baseColor =
           CONNECTION_TYPE_COLORS[edge.connectionType ?? ""] ??
@@ -477,14 +596,11 @@ export default function MemoryForceGraph({
         ctx.strokeStyle = isHighlighted
           ? baseColor.replace(/[\d.]+\)$/, "0.7)")
           : baseColor;
-        ctx.lineWidth = isHighlighted
-          ? 1 + edge.weight * 2
-          : 0.5 + edge.weight;
+        ctx.lineWidth = (isHighlighted ? 1 + edge.weight * 2 : 0.5 + edge.weight) / vp.scale;
         ctx.stroke();
       }
 
       // ── Draw nodes ──
-      // Sort: selected on top, then hovered, then by connectionCount
       const sorted = [...nodes].sort((a, b) => {
         if (a.id === selected?.id) return 1;
         if (b.id === selected?.id) return -1;
@@ -509,7 +625,6 @@ export default function MemoryForceGraph({
             );
           });
 
-        // Dim unrelated nodes when one is selected
         const dimmed = selected && !isSelected && !isConnectedToSelected;
         ctx.globalAlpha = dimmed ? 0.15 : 1;
 
@@ -519,7 +634,8 @@ export default function MemoryForceGraph({
         if (node.connectionCount > 2 && !dimmed) {
           const breathe =
             Math.sin(time * 0.0012 + node.connectionCount * 0.3) * 0.06 + 0.94;
-          const glowRadius = r * (1.5 + node.connectionCount * 0.15) * breathe;
+          const glowRadius =
+            r * (1.5 + node.connectionCount * 0.15) * breathe;
           const grad = ctx.createRadialGradient(
             node.x,
             node.y,
@@ -528,7 +644,10 @@ export default function MemoryForceGraph({
             node.y,
             glowRadius
           );
-          grad.addColorStop(0, node.color.replace("rgb", "rgba").replace(")", ", 0.2)"));
+          grad.addColorStop(
+            0,
+            node.color.replace("rgb", "rgba").replace(")", ", 0.2)")
+          );
           grad.addColorStop(1, "transparent");
           ctx.fillStyle = grad;
           ctx.beginPath();
@@ -555,13 +674,13 @@ export default function MemoryForceGraph({
         // Selected ring
         if (isSelected) {
           ctx.strokeStyle = "#f5a623";
-          ctx.lineWidth = 2.5;
+          ctx.lineWidth = 2.5 / vp.scale;
           ctx.beginPath();
           ctx.arc(node.x, node.y, r + 3, 0, Math.PI * 2);
           ctx.stroke();
         } else if (isHovered) {
           ctx.strokeStyle = "rgba(245, 166, 35, 0.5)";
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 1.5 / vp.scale;
           ctx.beginPath();
           ctx.arc(node.x, node.y, r + 2, 0, Math.PI * 2);
           ctx.stroke();
@@ -584,14 +703,17 @@ export default function MemoryForceGraph({
     <div ref={containerRef} className="relative w-full h-full">
       <canvas ref={canvasRef} className="absolute inset-0" />
 
-      {/* Tooltip */}
+      {/* Tooltip (positioned in screen space) */}
       {tooltip && (
         <div
           className="absolute pointer-events-none z-10 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-3 py-2 shadow-lg max-w-[280px]"
           style={{
             left: tooltip.x + 16,
             top: tooltip.y - 8,
-            transform: tooltip.x > dimensions.width - 300 ? "translateX(-110%)" : undefined,
+            transform:
+              tooltip.x > dimensions.width - 300
+                ? "translateX(-110%)"
+                : undefined,
           }}
         >
           <div className="text-xs text-[var(--text-primary)] leading-relaxed line-clamp-3">
@@ -610,6 +732,43 @@ export default function MemoryForceGraph({
           </div>
         </div>
       )}
+
+      {/* Zoom controls */}
+      <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
+        <button
+          onClick={zoomIn}
+          className="w-8 h-8 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors flex items-center justify-center text-lg font-light"
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          onClick={zoomOut}
+          className="w-8 h-8 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors flex items-center justify-center text-lg font-light"
+          title="Zoom out"
+        >
+          -
+        </button>
+        <button
+          onClick={resetView}
+          className="w-8 h-8 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors flex items-center justify-center"
+          title="Reset view"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9m11.25-5.25v4.5m0-4.5h-4.5m4.5 0L15 9m-11.25 11.25v-4.5m0 4.5h4.5m-4.5 0L9 15m11.25 5.25v-4.5m0 4.5h-4.5m4.5 0L15 15"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
