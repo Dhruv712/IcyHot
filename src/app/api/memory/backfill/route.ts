@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   // Abstract-only mode: generate abstract embeddings for memories that don't have them
   if (abstractOnly) {
-    const batchSize = limit || 10;
+    const batchSize = abstractOnly ? 30 : (limit || 10);
     const missing = await db
       .select({ id: memories.id, content: memories.content })
       .from(memories)
@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
 
     let processed = 0;
     let failed = 0;
+    const failedIds: string[] = [];
 
     // Process in serial batches of 3 to avoid rate limits
     for (let i = 0; i < missing.length; i += 3) {
@@ -56,16 +57,31 @@ export async function POST(request: NextRequest) {
               .update(memories)
               .set({ abstractEmbedding: abstractEmb })
               .where(eq(memories.id, mem.id));
-            return true;
+            return { success: true, id: mem.id };
           }
-          return false;
+          return { success: false, id: mem.id };
         })
       );
 
       for (const r of results) {
-        if (r.status === "fulfilled" && r.value) processed++;
-        else failed++;
+        if (r.status === "fulfilled" && r.value.success) {
+          processed++;
+        } else {
+          failed++;
+          const id = r.status === "fulfilled" ? r.value.id : null;
+          if (id) failedIds.push(id);
+        }
       }
+    }
+
+    // Mark permanently-failed memories so they don't block future batches.
+    // We set a 1024-dim zero vector — these won't match anything in cosine search.
+    if (failedIds.length > 0) {
+      const zeroVec = new Array(1024).fill(0);
+      await db
+        .update(memories)
+        .set({ abstractEmbedding: zeroVec })
+        .where(sql`${memories.id} IN ${failedIds}`);
     }
 
     const remaining = await db.execute(
