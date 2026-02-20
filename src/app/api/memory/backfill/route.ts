@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   // Abstract-only mode: generate abstract embeddings for memories that don't have them
   if (abstractOnly) {
-    const batchSize = abstractOnly ? 30 : (limit || 10);
+    const batchSize = limit > 1 ? limit : 1; // use limit=30 once debugged
     const missing = await db
       .select({ id: memories.id, content: memories.content })
       .from(memories)
@@ -45,21 +45,26 @@ export async function POST(request: NextRequest) {
     let processed = 0;
     let failed = 0;
     const failedIds: string[] = [];
+    let firstError: string | null = null;
 
     // Process in serial batches of 3 to avoid rate limits
     for (let i = 0; i < missing.length; i += 3) {
       const batch = missing.slice(i, i + 3);
       const results = await Promise.allSettled(
         batch.map(async (mem) => {
-          const abstractEmb = await generateAbstractEmbedding(mem.content);
-          if (abstractEmb) {
-            await db
-              .update(memories)
-              .set({ abstractEmbedding: abstractEmb })
-              .where(eq(memories.id, mem.id));
-            return { success: true, id: mem.id };
+          try {
+            const abstractEmb = await generateAbstractEmbedding(mem.content);
+            if (abstractEmb) {
+              await db
+                .update(memories)
+                .set({ abstractEmbedding: abstractEmb })
+                .where(eq(memories.id, mem.id));
+              return { success: true, id: mem.id, error: null };
+            }
+            return { success: false, id: mem.id, error: "returned null" };
+          } catch (err) {
+            return { success: false, id: mem.id, error: err instanceof Error ? err.message : String(err) };
           }
-          return { success: false, id: mem.id };
         })
       );
 
@@ -68,21 +73,25 @@ export async function POST(request: NextRequest) {
           processed++;
         } else {
           failed++;
-          const id = r.status === "fulfilled" ? r.value.id : null;
-          if (id) failedIds.push(id);
+          if (r.status === "fulfilled") {
+            failedIds.push(r.value.id);
+            if (!firstError) firstError = r.value.error;
+          } else {
+            if (!firstError) firstError = String(r.reason);
+          }
         }
       }
     }
 
     // Mark permanently-failed memories so they don't block future batches.
-    // We set a 1024-dim zero vector — these won't match anything in cosine search.
-    if (failedIds.length > 0) {
-      const zeroVec = new Array(1024).fill(0);
-      await db
-        .update(memories)
-        .set({ abstractEmbedding: zeroVec })
-        .where(sql`${memories.id} IN ${failedIds}`);
-    }
+    // Disabled during debugging — re-enable once root cause is found.
+    // if (failedIds.length > 0) {
+    //   const zeroVec = new Array(1024).fill(0);
+    //   await db
+    //     .update(memories)
+    //     .set({ abstractEmbedding: zeroVec })
+    //     .where(sql`${memories.id} IN ${failedIds}`);
+    // }
 
     const remaining = await db.execute(
       sql`SELECT COUNT(*) as count FROM memories WHERE user_id = ${userId} AND abstract_embedding IS NULL AND embedding IS NOT NULL`
@@ -98,6 +107,7 @@ export async function POST(request: NextRequest) {
       processed,
       failed,
       remaining: remainingCount,
+      firstError,
     });
   }
 
