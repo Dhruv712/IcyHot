@@ -4,7 +4,8 @@ import { db } from "@/db";
 import { memories, memorySyncState } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { processMemories } from "@/lib/memory/pipeline";
-import { generateAbstractEmbedding } from "@/lib/memory/abstract";
+import { abstractMemory } from "@/lib/memory/abstract";
+import { embedSingle } from "@/lib/memory/embed";
 
 export const maxDuration = 300; // Vercel Hobby with fluid compute allows up to 300s
 
@@ -53,15 +54,13 @@ export async function POST(request: NextRequest) {
       const results = await Promise.allSettled(
         batch.map(async (mem) => {
           try {
-            const abstractEmb = await generateAbstractEmbedding(mem.content);
-            if (abstractEmb) {
-              await db
-                .update(memories)
-                .set({ abstractEmbedding: abstractEmb })
-                .where(eq(memories.id, mem.id));
-              return { success: true, id: mem.id, error: null };
-            }
-            return { success: false, id: mem.id, error: "returned null" };
+            const abstractText = await abstractMemory(mem.content);
+            const abstractEmb = await embedSingle(abstractText);
+            await db
+              .update(memories)
+              .set({ abstractEmbedding: abstractEmb })
+              .where(eq(memories.id, mem.id));
+            return { success: true, id: mem.id, error: null };
           } catch (err) {
             return { success: false, id: mem.id, error: err instanceof Error ? err.message : String(err) };
           }
