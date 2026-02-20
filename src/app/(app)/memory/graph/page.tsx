@@ -23,6 +23,23 @@ interface SelectedNode {
   connectionCount: number;
 }
 
+function ExpandableReason({ reason }: { reason: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = reason.length > 120;
+
+  return (
+    <div
+      className={`mt-1 text-[10px] text-[var(--text-muted)] italic ${!expanded && isLong ? "cursor-pointer" : ""}`}
+      onClick={isLong ? () => setExpanded(!expanded) : undefined}
+    >
+      <span className={expanded ? "" : "line-clamp-2"}>{reason}</span>
+      {isLong && !expanded && (
+        <span className="text-[var(--amber)] not-italic ml-1">more</span>
+      )}
+    </div>
+  );
+}
+
 export default function MemoryGraphPage() {
   const { data, isLoading, error } = useMemoryGraph();
   const [viewMode, setViewMode] = useState<"graph" | "semantic">("graph");
@@ -256,9 +273,7 @@ export default function MemoryGraphPage() {
                             </div>
                           )}
                           {edge?.reason && (
-                            <div className="mt-1 text-[10px] text-[var(--text-muted)] italic line-clamp-2">
-                              {edge.reason}
-                            </div>
+                            <ExpandableReason reason={edge.reason} />
                           )}
                         </div>
                       );

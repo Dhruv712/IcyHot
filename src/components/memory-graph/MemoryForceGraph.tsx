@@ -7,6 +7,7 @@ import {
   forceManyBody,
   forceCenter,
   forceCollide,
+  forceRadial,
   type Simulation,
   type SimulationLinkDatum,
 } from "d3-force";
@@ -209,6 +210,13 @@ export default function MemoryForceGraph({
     nodesRef.current = nodes;
     edgesRef.current = edges;
 
+    // Build a set of connected node IDs so isolated nodes get weaker repulsion
+    const connectedIds = new Set<string>();
+    for (const e of edges) {
+      connectedIds.add(typeof e.source === "string" ? e.source : (e.source as MemNode).id);
+      connectedIds.add(typeof e.target === "string" ? e.target : (e.target as MemNode).id);
+    }
+
     const sim = forceSimulation<MemNode>(nodes)
       .force(
         "link",
@@ -217,8 +225,21 @@ export default function MemoryForceGraph({
           .distance(80)
           .strength((d) => (d as MemEdge).weight * 0.3)
       )
-      .force("charge", forceManyBody().strength(-40))
+      .force(
+        "charge",
+        forceManyBody<MemNode>().strength((d) =>
+          connectedIds.has(d.id) ? -40 : -8
+        )
+      )
       .force("center", forceCenter(width / 2, height / 2))
+      .force(
+        "radial",
+        forceRadial<MemNode>(
+          (d) => (connectedIds.has(d.id) ? 0 : Math.min(width, height) * 0.3),
+          width / 2,
+          height / 2
+        ).strength((d) => (connectedIds.has(d.id) ? 0 : 0.05))
+      )
       .force("collide", forceCollide<MemNode>((d) => d.nodeRadius + 2))
       .alphaDecay(0.015)
       .velocityDecay(0.55)
@@ -253,10 +274,17 @@ export default function MemoryForceGraph({
       sim.force("link", null);
       sim.force("charge", null);
       sim.force("center", null);
+      sim.force("radial", null);
       sim.alpha(0.3).restart();
       isTransitioning.current = true;
     } else {
       const edges = edgesRef.current;
+      const connectedIds = new Set<string>();
+      for (const e of edges) {
+        connectedIds.add(typeof e.source === "string" ? e.source : (e.source as MemNode).id);
+        connectedIds.add(typeof e.target === "string" ? e.target : (e.target as MemNode).id);
+      }
+
       sim
         .force(
           "link",
@@ -265,8 +293,21 @@ export default function MemoryForceGraph({
             .distance(80)
             .strength((d) => (d as MemEdge).weight * 0.3)
         )
-        .force("charge", forceManyBody().strength(-40))
-        .force("center", forceCenter(width / 2, height / 2));
+        .force(
+          "charge",
+          forceManyBody<MemNode>().strength((d) =>
+            connectedIds.has(d.id) ? -40 : -8
+          )
+        )
+        .force("center", forceCenter(width / 2, height / 2))
+        .force(
+          "radial",
+          forceRadial<MemNode>(
+            (d) => (connectedIds.has(d.id) ? 0 : Math.min(width, height) * 0.3),
+            width / 2,
+            height / 2
+          ).strength((d) => (connectedIds.has(d.id) ? 0 : 0.05))
+        );
 
       for (const node of nodes) {
         node.fx = null;
