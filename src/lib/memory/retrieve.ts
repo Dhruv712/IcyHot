@@ -65,6 +65,9 @@ const MAX_PER_ENTITY = 3; // Max results per contact before diversity penalty ki
 const OVER_REP_THRESHOLD = 0.3; // Entity in >30% of candidates = over-represented
 const DIVERSITY_WEIGHT = 0.3; // Score = 0.7 × activation + 0.3 × diversity
 
+// Implication deduplication
+const IMPLICATION_JACCARD_THRESHOLD = 0.55; // Word-set Jaccard > 0.55 = too similar
+
 // ── Decay function ─────────────────────────────────────────────────────
 
 function effectiveStrength(
@@ -202,6 +205,55 @@ function diversifyImplications(
   // Apply same diversity logic
   const diversified = diversifyByEntity(withEntities, maxResults);
   return diversified.map((d) => d.impl);
+}
+
+/**
+ * Deduplicate implications by text similarity (Jaccard on word sets).
+ * Keeps the highest-scored implication from each cluster of near-duplicates.
+ */
+function deduplicateImplicationsByContent(
+  implications: RetrievedImplication[]
+): RetrievedImplication[] {
+  if (implications.length <= 1) return implications;
+
+  // Tokenize each implication into a set of lowercase words (3+ chars)
+  const tokenized = implications.map((impl) => {
+    const words = new Set(
+      impl.content
+        .toLowerCase()
+        .replace(/[^a-z0-9\s'-]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 3)
+    );
+    return { impl, words };
+  });
+
+  const kept: typeof tokenized = [];
+
+  for (const candidate of tokenized) {
+    let isDuplicate = false;
+
+    for (const existing of kept) {
+      // Jaccard similarity: |intersection| / |union|
+      let intersection = 0;
+      for (const w of candidate.words) {
+        if (existing.words.has(w)) intersection++;
+      }
+      const union = candidate.words.size + existing.words.size - intersection;
+      const jaccard = union > 0 ? intersection / union : 0;
+
+      if (jaccard > IMPLICATION_JACCARD_THRESHOLD) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      kept.push(candidate);
+    }
+  }
+
+  return kept.map((k) => k.impl);
 }
 
 // ── Main retrieval function ────────────────────────────────────────────
@@ -536,9 +588,12 @@ export async function retrieveMemories(
     );
   }
 
+  // Deduplicate implications by text similarity before returning
+  const dedupedImplications = deduplicateImplicationsByContent(implications);
+
   return {
     memories: allResultMemories,
-    implications,
+    implications: dedupedImplications,
     connections: relevantConnections,
     query,
   };

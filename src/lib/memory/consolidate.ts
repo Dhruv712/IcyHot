@@ -46,7 +46,7 @@ interface ConsolidationResult {
 const CLUSTER_SIMILARITY = 0.65; // Lower than dedup (0.92) — we want related, not duplicate
 const MAX_CLUSTER_SIZE = 15; // Don't send too many memories to the LLM
 const MIN_CLUSTER_SIZE = 3; // Need at least 3 memories for meaningful connections
-const IMPLICATION_DEDUP_THRESHOLD = 0.80; // Similarity threshold for deduplicating implications (lowered from 0.88 — paraphrased implications need to be caught)
+const IMPLICATION_DEDUP_THRESHOLD = 0.75; // Similarity threshold for deduplicating implications (lowered from 0.80 — paraphrased implications need aggressive dedup)
 
 // ── Main entry point ───────────────────────────────────────────────
 
