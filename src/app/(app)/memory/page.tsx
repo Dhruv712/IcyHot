@@ -226,7 +226,7 @@ function SearchResults({ query }: { query: string }) {
                     </span>
                   )}
                   <span className="text-[10px] text-[var(--text-muted)]">
-                    {(impl.relevance * 100).toFixed(0)}% relevant
+                    strength: {impl.strength.toFixed(1)}
                   </span>
                 </div>
               </div>

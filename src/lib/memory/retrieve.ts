@@ -65,8 +65,9 @@ const MAX_PER_ENTITY = 3; // Max results per contact before diversity penalty ki
 const OVER_REP_THRESHOLD = 0.3; // Entity in >30% of candidates = over-represented
 const DIVERSITY_WEIGHT = 0.3; // Score = 0.7 × activation + 0.3 × diversity
 
-// Implication deduplication
-const IMPLICATION_JACCARD_THRESHOLD = 0.55; // Word-set Jaccard > 0.55 = too similar
+// Implication deduplication — uses both Jaccard AND containment similarity
+const IMPLICATION_JACCARD_THRESHOLD = 0.45; // Word-set Jaccard > 0.45 = too similar
+const IMPLICATION_CONTAINMENT_THRESHOLD = 0.65; // If 65%+ of smaller text's words appear in larger = duplicate
 
 // ── Decay function ─────────────────────────────────────────────────────
 
@@ -208,7 +209,11 @@ function diversifyImplications(
 }
 
 /**
- * Deduplicate implications by text similarity (Jaccard on word sets).
+ * Deduplicate implications by text similarity.
+ * Uses two signals:
+ *   1. Jaccard similarity (word-set overlap / union) — catches rephrased duplicates
+ *   2. Containment similarity (fraction of smaller text's words in larger) — catches
+ *      cases where one implication is a subset/expansion of another
  * Keeps the highest-scored implication from each cluster of near-duplicates.
  */
 function deduplicateImplicationsByContent(
@@ -216,14 +221,23 @@ function deduplicateImplicationsByContent(
 ): RetrievedImplication[] {
   if (implications.length <= 1) return implications;
 
-  // Tokenize each implication into a set of lowercase words (3+ chars)
+  // Stopwords to exclude from comparison (common filler that inflates similarity)
+  const STOP = new Set([
+    "the", "and", "you", "your", "that", "this", "with", "from", "have", "has",
+    "are", "was", "were", "been", "being", "for", "not", "but", "they", "than",
+    "more", "about", "into", "when", "which", "their", "them", "what", "also",
+    "may", "can", "could", "would", "should", "might", "seem", "seems",
+    "rather", "suggest", "suggests", "indicates", "shows",
+  ]);
+
+  // Tokenize each implication into a set of meaningful words
   const tokenized = implications.map((impl) => {
     const words = new Set(
       impl.content
         .toLowerCase()
         .replace(/[^a-z0-9\s'-]/g, " ")
         .split(/\s+/)
-        .filter((w) => w.length >= 3)
+        .filter((w) => w.length >= 3 && !STOP.has(w))
     );
     return { impl, words };
   });
@@ -234,15 +248,21 @@ function deduplicateImplicationsByContent(
     let isDuplicate = false;
 
     for (const existing of kept) {
-      // Jaccard similarity: |intersection| / |union|
+      // Count intersection
       let intersection = 0;
       for (const w of candidate.words) {
         if (existing.words.has(w)) intersection++;
       }
+
+      // Jaccard: |intersection| / |union|
       const union = candidate.words.size + existing.words.size - intersection;
       const jaccard = union > 0 ? intersection / union : 0;
 
-      if (jaccard > IMPLICATION_JACCARD_THRESHOLD) {
+      // Containment: |intersection| / |smaller set|
+      const smallerSize = Math.min(candidate.words.size, existing.words.size);
+      const containment = smallerSize > 0 ? intersection / smallerSize : 0;
+
+      if (jaccard > IMPLICATION_JACCARD_THRESHOLD || containment > IMPLICATION_CONTAINMENT_THRESHOLD) {
         isDuplicate = true;
         break;
       }
