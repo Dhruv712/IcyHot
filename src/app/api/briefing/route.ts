@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { dailyBriefings } from "@/db/schema";
+import { dailyBriefings, provocations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { generateDailyBriefing, type DailyBriefingContent } from "@/lib/briefing";
+import { generateDailyBriefing, type DailyBriefingContent, type BriefingProvocation } from "@/lib/briefing";
 
 export const maxDuration = 60;
 
@@ -27,8 +27,40 @@ export async function GET() {
     );
 
   if (cached) {
+    const briefing = JSON.parse(cached.content) as DailyBriefingContent;
+
+    // Always re-query provocations live — they change independently (dismissals, regenerations)
+    try {
+      const provRows = await db
+        .select({
+          id: provocations.id,
+          triggerContent: provocations.triggerContent,
+          provocation: provocations.provocation,
+          supportingMemoryContents: provocations.supportingMemoryContents,
+        })
+        .from(provocations)
+        .where(
+          and(
+            eq(provocations.userId, session.user.id),
+            eq(provocations.date, today),
+            eq(provocations.dismissed, false)
+          )
+        );
+
+      const liveProvocations: BriefingProvocation[] = provRows.map((p) => ({
+        id: p.id,
+        triggerContent: p.triggerContent,
+        provocation: p.provocation,
+        supportingMemoryContents: JSON.parse(p.supportingMemoryContents),
+      }));
+
+      briefing.provocations = liveProvocations.length > 0 ? liveProvocations : undefined;
+    } catch (error) {
+      console.error("[briefing-api] Failed to query live provocations:", error);
+    }
+
     return NextResponse.json({
-      briefing: JSON.parse(cached.content) as DailyBriefingContent,
+      briefing,
       date: today,
       cached: true,
     });
