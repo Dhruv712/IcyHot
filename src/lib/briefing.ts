@@ -61,6 +61,40 @@ export interface DailyBriefingContent {
   summary: string;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────
+
+async function queryTodayProvocations(userId: string, today: string): Promise<BriefingProvocation[] | undefined> {
+  try {
+    const provRows = await db
+      .select({
+        id: provocations.id,
+        triggerContent: provocations.triggerContent,
+        provocation: provocations.provocation,
+        supportingMemoryContents: provocations.supportingMemoryContents,
+      })
+      .from(provocations)
+      .where(
+        and(
+          eq(provocations.userId, userId),
+          eq(provocations.date, today),
+          eq(provocations.dismissed, false)
+        )
+      );
+
+    const result = provRows.map((p) => ({
+      id: p.id,
+      triggerContent: p.triggerContent,
+      provocation: p.provocation,
+      supportingMemoryContents: JSON.parse(p.supportingMemoryContents),
+    }));
+
+    return result.length > 0 ? result : undefined;
+  } catch (error) {
+    console.error("[briefing] Failed to query provocations (non-blocking):", error);
+    return undefined;
+  }
+}
+
 // ── Generation ─────────────────────────────────────────────────────────
 
 export async function generateDailyBriefing(userId: string): Promise<DailyBriefingContent | null> {
@@ -78,7 +112,10 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     );
 
   if (existing) {
-    return JSON.parse(existing.content) as DailyBriefingContent;
+    const cached = JSON.parse(existing.content) as DailyBriefingContent;
+    // Always re-query provocations live — they change independently (dismissals, regenerations)
+    cached.provocations = await queryTodayProvocations(userId, today);
+    return cached;
   }
 
   // Gather context
@@ -448,41 +485,14 @@ Only include contacts that appear in the context above.`,
 
     const llmResult = JSON.parse(jsonMatch[0]);
 
-    // Query today's non-dismissed provocations
-    let todayProvocations: BriefingProvocation[] = [];
-    try {
-      const provRows = await db
-        .select({
-          id: provocations.id,
-          triggerContent: provocations.triggerContent,
-          provocation: provocations.provocation,
-          supportingMemoryContents: provocations.supportingMemoryContents,
-        })
-        .from(provocations)
-        .where(
-          and(
-            eq(provocations.userId, userId),
-            eq(provocations.date, today),
-            eq(provocations.dismissed, false)
-          )
-        );
-
-      todayProvocations = provRows.map((p) => ({
-        id: p.id,
-        triggerContent: p.triggerContent,
-        provocation: p.provocation,
-        supportingMemoryContents: JSON.parse(p.supportingMemoryContents),
-      }));
-    } catch (error) {
-      console.error("[briefing] Failed to query provocations (non-blocking):", error);
-    }
+    const todayProvocations = await queryTodayProvocations(userId, today);
 
     const briefing: DailyBriefingContent = {
       todayContext: llmResult.todayContext || [],
       patternAlerts,
       relationshipArc: llmResult.relationshipArc || null,
       temperatureAlerts: llmResult.temperatureAlerts || temperatureAlerts,
-      provocations: todayProvocations.length > 0 ? todayProvocations : undefined,
+      provocations: todayProvocations,
       summary: llmResult.summary || "Here's your day at a glance.",
     };
 
