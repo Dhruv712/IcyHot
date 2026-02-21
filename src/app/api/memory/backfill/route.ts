@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { memories, memoryConnections, memoryImplications, memorySyncState } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { memories, memoryConnections, memoryImplications, memorySyncState, provocations } from "@/db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { processMemories } from "@/lib/memory/pipeline";
 import { consolidateMemories } from "@/lib/memory/consolidate";
+import { generateProvocationsForUser } from "@/lib/memory/provoke";
 import { abstractMemory } from "@/lib/memory/abstract";
 import { embedSingle } from "@/lib/memory/embed";
 
@@ -25,6 +26,7 @@ export async function POST(request: NextRequest) {
   let abstractOnly = false;
   let consolidationClean = false;
   let reconsolidate = false;
+  let regenerateProvocations = false;
   try {
     const body = await request.json();
     if (body.limit && typeof body.limit === "number") limit = body.limit;
@@ -33,6 +35,7 @@ export async function POST(request: NextRequest) {
     if (body.abstractOnly) abstractOnly = true;
     if (body.consolidationClean) consolidationClean = true;
     if (body.reconsolidate) reconsolidate = true;
+    if (body.regenerateProvocations) regenerateProvocations = true;
   } catch {
     // No body or invalid JSON — use defaults
   }
@@ -80,6 +83,35 @@ export async function POST(request: NextRequest) {
       deletedImplications: deletedImplications.length,
       ...(consolidationResult ? { reconsolidation: { success: true, ...consolidationResult } } : {}),
     });
+  }
+
+  // Regenerate provocations: delete today's provocations, then regenerate
+  if (regenerateProvocations) {
+    const today = new Date().toISOString().slice(0, 10);
+    const deleted = await db
+      .delete(provocations)
+      .where(and(eq(provocations.userId, userId), eq(provocations.date, today)))
+      .returning({ id: provocations.id });
+
+    console.log(`[backfill] Deleted ${deleted.length} provocations for ${today}`);
+
+    try {
+      const result = await generateProvocationsForUser(userId);
+      return NextResponse.json({
+        success: true,
+        regenerateProvocations: true,
+        deletedProvocations: deleted.length,
+        generated: result.generated,
+        errors: result.errors,
+      });
+    } catch (error) {
+      return NextResponse.json({
+        success: false,
+        regenerateProvocations: true,
+        deletedProvocations: deleted.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // Abstract-only mode: generate abstract embeddings for memories that don't have them
