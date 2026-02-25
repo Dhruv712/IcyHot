@@ -81,7 +81,6 @@ export async function GET(request: NextRequest) {
       console.log(`[cron] No new content for ${user.id}, skipping briefing generation`);
       result.memory = { success: true };
       result.consolidation = { success: true };
-      result.provocations = { success: true, generated: 0 };
       result.briefing = { success: true };
       result.push = { success: true, sent: 0 };
     } else {
@@ -104,18 +103,6 @@ export async function GET(request: NextRequest) {
       } catch (error) {
         console.error(`[cron] Memory consolidation failed for ${user.id}:`, error);
         result.consolidation = {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
-
-      // Provocations — dialogue partner challenges using memory counter-evidence (failures don't block briefing)
-      try {
-        const provResult = await generateProvocationsForUser(user.id);
-        result.provocations = { success: true, generated: provResult.generated };
-      } catch (error) {
-        console.error(`[cron] Provocation generation failed for ${user.id}:`, error);
-        result.provocations = {
           success: false,
           error: error instanceof Error ? error.message : "Unknown error",
         };
@@ -163,6 +150,18 @@ export async function GET(request: NextRequest) {
           error: error instanceof Error ? error.message : "Unknown error",
         };
       }
+    }
+
+    // Provocations — run daily regardless of new content (they look back 3 days into existing data)
+    try {
+      const provResult = await generateProvocationsForUser(user.id);
+      result.provocations = { success: true, generated: provResult.generated };
+    } catch (error) {
+      console.error(`[cron] Provocation generation failed for ${user.id}:`, error);
+      result.provocations = {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
     }
 
     // Daily health score snapshot
