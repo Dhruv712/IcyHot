@@ -201,6 +201,26 @@ export const journalOpenLoops = pgTable("journal_open_loops", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Journal Drafts (autosave to DB, commit to GitHub via cron) ────────
+
+export const journalDrafts = pgTable(
+  "journal_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    entryDate: date("entry_date").notNull(),
+    content: text("content").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    committedToGithubAt: timestamp("committed_to_github_at"),
+    githubSha: text("github_sha"),
+  },
+  (table) => [
+    uniqueIndex("journal_drafts_user_date").on(table.userId, table.entryDate),
+  ]
+);
+
 // ── Daily Suggestions ──────────────────────────────────────────────────
 
 export const dailySuggestions = pgTable(

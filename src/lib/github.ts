@@ -1,3 +1,7 @@
+import { db } from "@/db";
+import { journalDrafts } from "@/db/schema";
+import { eq, and, or, isNull, lt } from "drizzle-orm";
+
 const REPO_OWNER = "Dhruv712";
 const REPO_NAME = "Obsidian_Journals";
 const JOURNAL_PATH = "Journals";
@@ -162,4 +166,57 @@ export async function createOrUpdateJournalFile(
 
   const data = await res.json();
   return { sha: data.content.sha };
+}
+
+/**
+ * Commit all dirty drafts (where updatedAt > committedToGithubAt) to GitHub.
+ * Called by the daily cron job before journal sync.
+ * Returns the number of files committed.
+ */
+export async function commitDirtyDraftsToGithub(userId: string): Promise<{ committed: number }> {
+  // Find drafts that have been updated since their last GitHub commit
+  const dirtyDrafts = await db
+    .select()
+    .from(journalDrafts)
+    .where(
+      and(
+        eq(journalDrafts.userId, userId),
+        or(
+          isNull(journalDrafts.committedToGithubAt),
+          lt(journalDrafts.committedToGithubAt, journalDrafts.updatedAt)
+        )
+      )
+    );
+
+  let committed = 0;
+
+  for (const draft of dirtyDrafts) {
+    try {
+      const d = new Date(draft.entryDate + "T12:00:00");
+      const filename = journalFilename(d);
+
+      // Get current SHA from GitHub (needed for updates)
+      const currentSha = await getJournalFileSha(filename);
+
+      // Commit to GitHub
+      const result = await createOrUpdateJournalFile(filename, draft.content, currentSha);
+
+      // Update draft record with new SHA and commit timestamp
+      await db
+        .update(journalDrafts)
+        .set({
+          githubSha: result.sha,
+          committedToGithubAt: new Date(),
+        })
+        .where(eq(journalDrafts.id, draft.id));
+
+      committed++;
+      console.log(`[github] Committed draft for ${draft.entryDate} → ${filename}`);
+    } catch (error) {
+      console.error(`[github] Failed to commit draft for ${draft.entryDate}:`, error);
+      // Continue with other drafts — don't let one failure block the rest
+    }
+  }
+
+  return { committed };
 }

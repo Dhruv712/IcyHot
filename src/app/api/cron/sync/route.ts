@@ -4,6 +4,7 @@ import { users, dailyBriefings, dailySuggestions } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { syncJournalEntries } from "@/lib/journal";
 import { syncCalendarEvents } from "@/lib/calendar";
+import { commitDirtyDraftsToGithub } from "@/lib/github";
 import { generateDailyBriefing } from "@/lib/briefing";
 import { sendPushToUser } from "@/lib/push";
 import { snapshotHealthScore } from "@/lib/health";
@@ -51,6 +52,17 @@ export async function GET(request: NextRequest) {
     };
 
     let hasNewContent = false;
+
+    // Commit any dirty drafts from the in-app editor to GitHub before syncing
+    try {
+      const commitResult = await commitDirtyDraftsToGithub(user.id);
+      if (commitResult.committed > 0) {
+        console.log(`[cron] Committed ${commitResult.committed} drafts to GitHub for ${user.id}`);
+      }
+    } catch (error) {
+      console.error(`[cron] Draft commit failed for ${user.id}:`, error);
+      // Non-blocking — journal sync can still pick up Obsidian entries
+    }
 
     try {
       const journalResult = await syncJournalEntries(user.id);

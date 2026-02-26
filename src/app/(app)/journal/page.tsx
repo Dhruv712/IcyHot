@@ -16,7 +16,6 @@ const MarkdownEditor = dynamic(
 );
 
 const AUTOSAVE_DELAY = 2_000; // 2s after last keystroke
-const PROCESS_DELAY = 30_000; // 30s idle before triggering memory processing
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -26,46 +25,37 @@ export default function JournalPage() {
   );
   const [showEntries, setShowEntries] = useState(false);
 
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const entryDate = selectedDate ?? todayStr;
+
   const { data: entry, isLoading } = useJournalEntry(selectedDate);
   const { data: entriesData } = useJournalEntries();
   const saveMutation = useSaveJournalEntry();
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [currentSha, setCurrentSha] = useState<string | null>(null);
-  const [hasProcessed, setHasProcessed] = useState(false);
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
-  const latestMarkdownRef = useRef("");
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const processTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDirtyRef = useRef(false);
   const isSavingRef = useRef(false);
-  const currentShaRef = useRef<string | null>(null);
-  const entryFilenameRef = useRef<string | null>(null);
+  const entryDateRef = useRef(entryDate);
 
-  // Keep refs in sync
+  // Keep entryDate ref in sync
   useEffect(() => {
-    currentShaRef.current = currentSha;
-  }, [currentSha]);
+    entryDateRef.current = entryDate;
+  }, [entryDate]);
 
-  // Sync SHA and filename when entry loads
+  // Reset dirty state when entry loads
   useEffect(() => {
     if (entry) {
-      setCurrentSha(entry.sha);
-      currentShaRef.current = entry.sha;
-      entryFilenameRef.current = entry.filename;
       isDirtyRef.current = false;
-      latestMarkdownRef.current = entry.content;
       setSaveStatus("idle");
-      setHasProcessed(false);
     }
   }, [entry]);
 
   // Date display
-  const displayDate = selectedDate
-    ? new Date(selectedDate + "T12:00:00")
-    : new Date();
+  const displayDate = new Date(entryDate + "T12:00:00");
   const dateDisplay = displayDate.toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -73,90 +63,73 @@ export default function JournalPage() {
     day: "numeric",
   });
 
-  const todayStr = new Date().toISOString().slice(0, 10);
-
   // ── Core save function ──────────────────────────────────────────────
-  const doSave = useCallback(
-    (process: boolean) => {
-      const filename = entryFilenameRef.current;
-      const content = editorRef.current?.getMarkdown() ?? latestMarkdownRef.current;
+  const doSave = useCallback(() => {
+    const content =
+      editorRef.current?.getMarkdown() ?? "";
 
-      if (!filename || !content.trim() || isSavingRef.current) return;
-      if (!isDirtyRef.current && !process) return;
+    if (!content.trim() || isSavingRef.current) return;
+    if (!isDirtyRef.current) return;
 
-      isSavingRef.current = true;
-      setSaveStatus("saving");
+    isSavingRef.current = true;
+    setSaveStatus("saving");
 
-      saveMutation.mutate(
-        {
-          content,
-          filename,
-          sha: currentShaRef.current,
-          process,
+    saveMutation.mutate(
+      {
+        content,
+        entryDate: entryDateRef.current,
+      },
+      {
+        onSuccess: () => {
+          isDirtyRef.current = false;
+          isSavingRef.current = false;
+          setSaveStatus("saved");
+
+          // Fade status back to idle after 3s
+          if (savedFadeTimerRef.current)
+            clearTimeout(savedFadeTimerRef.current);
+          savedFadeTimerRef.current = setTimeout(
+            () => setSaveStatus("idle"),
+            3000
+          );
         },
-        {
-          onSuccess: (result) => {
-            setCurrentSha(result.sha);
-            currentShaRef.current = result.sha;
-            isDirtyRef.current = false;
-            isSavingRef.current = false;
-            setSaveStatus("saved");
+        onError: () => {
+          isSavingRef.current = false;
+          setSaveStatus("error");
 
-            if (process) setHasProcessed(true);
-
-            // Fade status back to idle after 3s
-            if (savedFadeTimerRef.current)
-              clearTimeout(savedFadeTimerRef.current);
-            savedFadeTimerRef.current = setTimeout(
-              () => setSaveStatus("idle"),
-              3000
-            );
-          },
-          onError: () => {
-            isSavingRef.current = false;
-            setSaveStatus("error");
-          },
-        }
-      );
-    },
-    [saveMutation]
-  );
+          // Retry after 5s
+          setTimeout(() => {
+            if (isDirtyRef.current) doSave();
+          }, 5000);
+        },
+      }
+    );
+  }, [saveMutation]);
 
   // ── Schedule autosave on change ─────────────────────────────────────
   const handleEditorChange = useCallback(
-    (markdown: string) => {
-      latestMarkdownRef.current = markdown;
+    (_markdown: string) => {
       isDirtyRef.current = true;
       setSaveStatus("idle"); // clear "Saved" while typing
 
-      // Clear existing timers
+      // Clear existing timer
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-      if (processTimerRef.current) clearTimeout(processTimerRef.current);
 
-      // Quick save after 2s idle
+      // Save after 2s idle
       autosaveTimerRef.current = setTimeout(() => {
-        doSave(false);
+        doSave();
       }, AUTOSAVE_DELAY);
-
-      // Full save (with memory processing) after 30s idle, only once per session
-      if (!hasProcessed) {
-        processTimerRef.current = setTimeout(() => {
-          doSave(true);
-        }, PROCESS_DELAY);
-      }
     },
-    [doSave, hasProcessed]
+    [doSave]
   );
 
-  // ── Cmd+S force-save with processing ────────────────────────────────
+  // ── Cmd+S force-save ────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        // Cancel pending autosave, do a full save now
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-        if (processTimerRef.current) clearTimeout(processTimerRef.current);
-        doSave(true);
+        doSave();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -167,10 +140,8 @@ export default function JournalPage() {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden" && isDirtyRef.current) {
-        // Cancel pending timers — save immediately
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-        if (processTimerRef.current) clearTimeout(processTimerRef.current);
-        doSave(false);
+        doSave();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -182,7 +153,6 @@ export default function JournalPage() {
   useEffect(() => {
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-      if (processTimerRef.current) clearTimeout(processTimerRef.current);
       if (savedFadeTimerRef.current) clearTimeout(savedFadeTimerRef.current);
     };
   }, []);
@@ -193,14 +163,12 @@ export default function JournalPage() {
       // Save current entry before switching if dirty
       if (isDirtyRef.current) {
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-        if (processTimerRef.current) clearTimeout(processTimerRef.current);
-        doSave(false);
+        doSave();
       }
 
       setSelectedDate(date === todayStr ? undefined : date);
       isDirtyRef.current = false;
       setSaveStatus("idle");
-      setHasProcessed(false);
       setShowEntries(false);
     },
     [todayStr, doSave]
@@ -348,9 +316,7 @@ export default function JournalPage() {
           {/* Save status — subtle, Notion-style */}
           <span
             className={`text-xs transition-opacity duration-300 ${
-              saveStatus === "idle"
-                ? "opacity-0"
-                : "opacity-100"
+              saveStatus === "idle" ? "opacity-0" : "opacity-100"
             } ${
               saveStatus === "error"
                 ? "text-red-400"

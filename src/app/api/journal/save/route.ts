@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import {
-  getJournalFileContent,
-  getJournalFileSha,
-  createOrUpdateJournalFile,
-  journalFilename,
-} from "@/lib/github";
-import { syncJournalEntries } from "@/lib/journal";
-import { processMemories } from "@/lib/memory/pipeline";
+import { db } from "@/db";
+import { journalDrafts, journalSyncState } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
+import { journalFilename, getJournalFileContent, getJournalFileSha, parseJournalDate } from "@/lib/github";
 
-export const maxDuration = 120;
+export const maxDuration = 30;
 
 /**
  * GET — Load a journal entry for a given date (defaults to today).
+ * Reads from Neon draft first, falls back to GitHub for old entries.
  * ?date=2026-02-25
  */
 export async function GET(request: NextRequest) {
@@ -23,16 +20,66 @@ export async function GET(request: NextRequest) {
 
   const dateParam = request.nextUrl.searchParams.get("date");
   const d = dateParam ? new Date(dateParam + "T12:00:00") : new Date();
+  const entryDate = d.toISOString().slice(0, 10);
   const filename = journalFilename(d);
 
   try {
+    // 1. Check Neon draft first
+    const [draft] = await db
+      .select()
+      .from(journalDrafts)
+      .where(
+        and(
+          eq(journalDrafts.userId, session.user.id),
+          eq(journalDrafts.entryDate, entryDate)
+        )
+      )
+      .limit(1);
+
+    if (draft) {
+      return NextResponse.json({
+        filename,
+        content: draft.content,
+        entryDate,
+        exists: true,
+        source: "db",
+      });
+    }
+
+    // 2. Fall back to GitHub for entries not yet in the DB
     const sha = await getJournalFileSha(filename);
     if (!sha) {
-      return NextResponse.json({ filename, content: "", sha: null, exists: false });
+      return NextResponse.json({
+        filename,
+        content: "",
+        entryDate,
+        exists: false,
+        source: "new",
+      });
     }
 
     const content = await getJournalFileContent(`Journals/${filename}`);
-    return NextResponse.json({ filename, content, sha, exists: true });
+
+    // 3. Backfill into the DB so we don't hit GitHub again
+    await db
+      .insert(journalDrafts)
+      .values({
+        userId: session.user.id,
+        entryDate,
+        content,
+        githubSha: sha,
+        committedToGithubAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoNothing();
+
+    return NextResponse.json({
+      filename,
+      content,
+      entryDate,
+      exists: true,
+      source: "github",
+    });
   } catch (error) {
     console.error("[journal-save] Load error:", error);
     return NextResponse.json(
@@ -43,11 +90,10 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST — Save a journal entry to GitHub.
- * Body: { content: string, filename: string, sha: string | null, process?: boolean }
+ * POST — Autosave a journal entry to Neon DB.
+ * Body: { content: string, entryDate: string }
  *
- * When `process` is false (or omitted), does a quick save (just GitHub commit).
- * When `process` is true, also triggers journal sync + memory processing.
+ * This is fast (just a DB upsert). GitHub commit happens via daily cron.
  */
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -56,42 +102,40 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { content, filename, sha, process: shouldProcess } = await request.json();
+    const { content, entryDate } = await request.json();
 
-    if (!content || !filename) {
+    if (!content || !entryDate) {
       return NextResponse.json(
-        { error: "content and filename are required" },
+        { error: "content and entryDate are required" },
         { status: 400 }
       );
     }
 
-    // 1. Save to GitHub
-    const result = await createOrUpdateJournalFile(filename, content, sha);
-
-    // Quick save — just return the new SHA
-    if (!shouldProcess) {
-      return NextResponse.json({
-        sha: result.sha,
-        quickSave: true,
-      });
-    }
-
-    // Full save — also trigger sync + memory processing
-    // 2. Trigger journal sync (processes new entries → interactions, insights, etc.)
-    const syncResult = await syncJournalEntries(session.user.id);
-
-    // 3. Trigger memory processing (extracts atomic memories → embeds → stores)
-    let memoryResult = { filesProcessed: 0, memoriesCreated: 0, memoriesReinforced: 0, remaining: 0 };
-    try {
-      memoryResult = await processMemories(session.user.id, { limit: 1, deadlineMs: 60_000 });
-    } catch (memError) {
-      console.error("[journal-save] Memory processing failed (non-blocking):", memError);
-    }
+    // Upsert draft — update content + updatedAt on conflict
+    const [result] = await db
+      .insert(journalDrafts)
+      .values({
+        userId: session.user.id,
+        entryDate,
+        content,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [journalDrafts.userId, journalDrafts.entryDate],
+        set: {
+          content,
+          updatedAt: new Date(),
+        },
+        setWhere: and(
+          eq(journalDrafts.userId, session.user.id),
+          eq(journalDrafts.entryDate, entryDate)
+        ),
+      })
+      .returning({ id: journalDrafts.id, updatedAt: journalDrafts.updatedAt });
 
     return NextResponse.json({
-      sha: result.sha,
-      sync: syncResult,
-      memory: memoryResult,
+      saved: true,
+      updatedAt: result.updatedAt,
     });
   } catch (error) {
     console.error("[journal-save] Save error:", error);

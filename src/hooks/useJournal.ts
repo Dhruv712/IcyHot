@@ -188,31 +188,22 @@ export function useJournalNewPersonAction() {
 export interface JournalEntry {
   filename: string;
   content: string;
-  sha: string | null;
+  entryDate: string;
   exists: boolean;
+  source: "db" | "github" | "new";
 }
 
 export interface JournalSavePayload {
   content: string;
-  filename: string;
-  sha: string | null;
-  /** When true, also triggers sync + memory processing (slower). Default: false (quick save). */
-  process?: boolean;
+  entryDate: string;
 }
 
 export interface JournalSaveResult {
-  sha: string;
-  quickSave?: boolean;
-  sync?: JournalSyncResult;
-  memory?: {
-    filesProcessed: number;
-    memoriesCreated: number;
-    memoriesReinforced: number;
-  };
+  saved: boolean;
+  updatedAt: string;
 }
 
 export interface JournalEntryListItem {
-  filename: string;
   date: string;
   name: string;
 }
@@ -245,8 +236,6 @@ export function useJournalEntry(date?: string) {
 }
 
 export function useSaveJournalEntry() {
-  const queryClient = useQueryClient();
-
   return useMutation<JournalSaveResult, Error, JournalSavePayload>({
     mutationFn: async (payload) => {
       const res = await fetch("/api/journal/save", {
@@ -259,22 +248,6 @@ export function useSaveJournalEntry() {
         throw new Error(data.error || "Save failed");
       }
       return res.json();
-    },
-    onSuccess: (_data, variables) => {
-      // Always invalidate the entry itself (so reloads get latest SHA)
-      queryClient.invalidateQueries({ queryKey: ["journal-entries"] });
-
-      // Only invalidate heavy queries on full saves (with processing)
-      if (variables.process) {
-        queryClient.invalidateQueries({ queryKey: ["journal-entry"] });
-        queryClient.invalidateQueries({ queryKey: ["journal-status"] });
-        queryClient.invalidateQueries({ queryKey: ["journal-insights"] });
-        queryClient.invalidateQueries({ queryKey: ["journal-open-loops"] });
-        queryClient.invalidateQueries({ queryKey: ["journal-new-people"] });
-        queryClient.invalidateQueries({ queryKey: ["graph"] });
-        queryClient.invalidateQueries({ queryKey: ["contact"] });
-        queryClient.invalidateQueries({ queryKey: ["memory-graph"] });
-      }
     },
   });
 }
