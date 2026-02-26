@@ -165,8 +165,8 @@ export function kMeansClusters(
     }
   }
 
-  // Build cluster objects
-  const clusters: MemoryCluster[] = [];
+  // Build cluster objects (without labels first)
+  const clusterGroups: { centroidIdx: number; memberIds: string[]; members: MemoryPoint[] }[] = [];
   for (let c = 0; c < k; c++) {
     const memberIds: string[] = [];
     for (let i = 0; i < n; i++) {
@@ -175,24 +175,26 @@ export function kMeansClusters(
     if (memberIds.length === 0) continue; // Skip empty clusters
 
     const members = memberIds.map((id) => memories.find((m) => m.id === id)!);
-    const label = autoLabel(members);
-
-    clusters.push({
-      centroid: centroids[c],
-      label,
-      memberCount: memberIds.length,
-      memberIds,
-      x: 0,
-      y: 0,
-    });
+    clusterGroups.push({ centroidIdx: c, memberIds, members });
   }
+
+  // Auto-label all clusters together (TF-IDF needs cross-cluster data)
+  const labels = autoLabelAll(clusterGroups.map((g) => g.members));
+
+  const clusters: MemoryCluster[] = clusterGroups.map((g, i) => ({
+    centroid: centroids[g.centroidIdx],
+    label: labels[i],
+    memberCount: g.memberIds.length,
+    memberIds: g.memberIds,
+    x: 0,
+    y: 0,
+  }));
 
   return clusters;
 }
 
-// ── Auto-labeling ──────────────────────────────────────────────────────
+// ── Auto-labeling (TF-IDF across clusters) ───────────────────────────
 
-// Common stop words to ignore
 const STOP_WORDS = new Set([
   "the", "a", "an", "is", "was", "are", "were", "be", "been", "being",
   "have", "has", "had", "do", "does", "did", "will", "would", "could",
@@ -209,44 +211,88 @@ const STOP_WORDS = new Set([
   "them", "their", "what", "which", "who", "whom", "up", "also", "much",
   "many", "like", "even", "still", "got", "get", "really", "think",
   "things", "thing", "something", "going", "want", "went", "said",
+  "know", "feel", "feeling", "felt", "make", "made", "come", "came",
+  "back", "time", "been", "people", "person", "don't", "didn't", "it's",
+  "that's", "there's", "i'm", "i've", "i'll", "i'd", "we're", "we've",
+  // Date/time words — these are NEVER meaningful cluster labels
+  "january", "february", "march", "april", "june", "july", "august",
+  "september", "october", "november", "december",
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+  "today", "yesterday", "tomorrow", "week", "month", "year", "morning",
+  "afternoon", "evening", "night", "date", "day", "days", "weeks", "months",
+  "years", "meeting", "call", "called", "talked", "spoke",
 ]);
 
-function autoLabel(members: MemoryPoint[]): string {
-  // Count contact mentions
-  const contactCounts = new Map<string, number>();
-  for (const m of members) {
-    for (const cid of m.contactIds) {
-      contactCounts.set(cid, (contactCounts.get(cid) ?? 0) + 1);
-    }
-  }
+// Reject any token that looks like a number or date fragment
+function isDateOrNumber(w: string): boolean {
+  if (/^\d+$/.test(w)) return true; // Pure number (2026, 14, etc.)
+  if (/^\d{4}-\d{2}/.test(w)) return true; // Date pattern
+  if (/^\d+(st|nd|rd|th)$/.test(w)) return true; // Ordinals
+  return false;
+}
 
-  // Extract distinctive words (TF-IDF-like: frequent in cluster)
-  const wordCounts = new Map<string, number>();
-  for (const m of members) {
-    const words = m.content
-      .toLowerCase()
-      .replace(/[^a-z0-9\s'-]/g, "")
-      .split(/\s+/)
-      .filter((w) => w.length > 3 && !STOP_WORDS.has(w));
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z\s'-]/g, " ") // strip numbers and punctuation
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !STOP_WORDS.has(w) && !isDateOrNumber(w));
+}
 
-    const seen = new Set<string>();
-    for (const w of words) {
-      if (!seen.has(w)) {
-        wordCounts.set(w, (wordCounts.get(w) ?? 0) + 1);
-        seen.add(w);
+/**
+ * Label all clusters at once using proper TF-IDF.
+ * Words common across all clusters get downweighted.
+ */
+function autoLabelAll(
+  clusterMembers: MemoryPoint[][],
+): string[] {
+  const numClusters = clusterMembers.length;
+
+  // 1. Compute document frequency (how many clusters contain this word)
+  const docFreq = new Map<string, number>();
+  const clusterWords: Map<string, number>[] = [];
+
+  for (const members of clusterMembers) {
+    const tf = new Map<string, number>();
+    const clusterVocab = new Set<string>();
+
+    for (const m of members) {
+      const words = tokenize(m.content);
+      const seen = new Set<string>();
+      for (const w of words) {
+        if (!seen.has(w)) {
+          tf.set(w, (tf.get(w) ?? 0) + 1);
+          clusterVocab.add(w);
+          seen.add(w);
+        }
       }
     }
+
+    // Update document frequency
+    for (const w of clusterVocab) {
+      docFreq.set(w, (docFreq.get(w) ?? 0) + 1);
+    }
+
+    clusterWords.push(tf);
   }
 
-  // Sort words by frequency (TF), take top 2
-  const topWords = Array.from(wordCounts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 2)
-    .map(([word]) => word);
+  // 2. For each cluster, score words by TF-IDF and pick top 2
+  return clusterWords.map((tf) => {
+    const scored: [string, number][] = [];
 
-  // Build label
-  if (topWords.length === 0) return "misc";
-  return topWords.join(" & ");
+    for (const [word, count] of tf) {
+      const df = docFreq.get(word) ?? 1;
+      // IDF: words appearing in every cluster get score ~0
+      const idf = Math.log((numClusters + 1) / (df + 1));
+      scored.push([word, count * idf]);
+    }
+
+    scored.sort((a, b) => b[1] - a[1]);
+    const top = scored.slice(0, 2).map(([w]) => w);
+
+    if (top.length === 0) return "misc";
+    return top.join(" · ");
+  });
 }
 
 // ── 2D layout via d3-force ─────────────────────────────────────────────
@@ -288,15 +334,15 @@ export function layoutClusters(clusters: MemoryCluster[]): void {
       "link",
       forceLink(links as any)
         .id((d: any) => d.index)
-        .distance((d: any) => 100 * (1 - d.similarity))
-        .strength(0.5),
+        .distance((d: any) => 150 * (1 - d.similarity) + 50)
+        .strength(0.3),
     )
-    .force("charge", forceManyBody().strength(-30))
+    .force("charge", forceManyBody().strength(-120))
     .force("center", forceCenter(0, 0))
     .stop();
 
   // Run synchronously
-  for (let i = 0; i < 300; i++) sim.tick();
+  for (let i = 0; i < 400; i++) sim.tick();
 
   // Normalize to [0, 1]
   let minX = Infinity,

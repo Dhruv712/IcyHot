@@ -118,7 +118,7 @@ export async function GET() {
   }
 
   // K-means
-  const k = Math.min(12, Math.max(4, Math.floor(memories.length / 8)));
+  const k = Math.min(8, Math.max(3, Math.floor(memories.length / 15)));
   const clusters = kMeansClusters(memories, k);
   layoutClusters(clusters);
 
