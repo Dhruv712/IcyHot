@@ -1,29 +1,36 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useJournalEntry,
   useJournalEntries,
   useSaveJournalEntry,
+  type JournalEntry,
 } from "@/hooks/useJournal";
 import dynamic from "next/dynamic";
 import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
 
-// Dynamic import to avoid SSR issues with Tiptap
 const MarkdownEditor = dynamic(
   () => import("@/components/journal/MarkdownEditor"),
   { ssr: false }
 );
 
-const AUTOSAVE_DELAY = 2_000; // 2s after last keystroke
+const AUTOSAVE_DELAY = 2_000;
+const FOCUS_FADE_DELAY = 2_000; // ms after mouse stops before re-fading
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export default function JournalPage() {
+  const queryClient = useQueryClient();
+
   const [selectedDate, setSelectedDate] = useState<string | undefined>(
     undefined
   );
   const [showEntries, setShowEntries] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const entryDate = selectedDate ?? todayStr;
@@ -35,8 +42,10 @@ export default function JournalPage() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDirtyRef = useRef(false);
   const isSavingRef = useRef(false);
   const entryDateRef = useRef(entryDate);
@@ -54,6 +63,43 @@ export default function JournalPage() {
     }
   }, [entry]);
 
+  // Scroll to top when switching entries
+  useEffect(() => {
+    scrollRef.current?.scrollTo(0, 0);
+  }, [entryDate]);
+
+  // ── Focus mode ────────────────────────────────────────────────────
+  const handleTypingStart = useCallback(() => {
+    if (!focusMode) return;
+    setIsFocused(true);
+    if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+  }, [focusMode]);
+
+  useEffect(() => {
+    if (!focusMode) {
+      setIsFocused(false);
+      return;
+    }
+
+    const handleMouseMove = () => {
+      setIsFocused(false);
+      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = setTimeout(() => {
+        // Only re-fade if editor is focused (user went back to typing)
+        const active = document.activeElement;
+        const isEditorFocused =
+          active?.closest(".journal-editor-content") !== null;
+        if (isEditorFocused) setIsFocused(true);
+      }, FOCUS_FADE_DELAY);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+    };
+  }, [focusMode]);
+
   // Date display
   const displayDate = new Date(entryDate + "T12:00:00");
   const dateDisplay = displayDate.toLocaleDateString("en-US", {
@@ -65,27 +111,32 @@ export default function JournalPage() {
 
   // ── Core save function ──────────────────────────────────────────────
   const doSave = useCallback(() => {
-    const content =
-      editorRef.current?.getMarkdown() ?? "";
+    const content = editorRef.current?.getMarkdown() ?? "";
 
     if (!content.trim() || isSavingRef.current) return;
     if (!isDirtyRef.current) return;
 
+    const savingDate = entryDateRef.current;
     isSavingRef.current = true;
     setSaveStatus("saving");
 
     saveMutation.mutate(
-      {
-        content,
-        entryDate: entryDateRef.current,
-      },
+      { content, entryDate: savingDate },
       {
         onSuccess: () => {
           isDirtyRef.current = false;
           isSavingRef.current = false;
           setSaveStatus("saved");
 
-          // Fade status back to idle after 3s
+          // Update the react-query cache so navigating back shows latest content
+          const queryKey = [
+            "journal-entry",
+            savingDate === todayStr ? "today" : savingDate,
+          ];
+          queryClient.setQueryData<JournalEntry>(queryKey, (old) =>
+            old ? { ...old, content, exists: true, source: "db" } : old
+          );
+
           if (savedFadeTimerRef.current)
             clearTimeout(savedFadeTimerRef.current);
           savedFadeTimerRef.current = setTimeout(
@@ -96,31 +147,27 @@ export default function JournalPage() {
         onError: () => {
           isSavingRef.current = false;
           setSaveStatus("error");
-
-          // Retry after 5s
           setTimeout(() => {
             if (isDirtyRef.current) doSave();
           }, 5000);
         },
       }
     );
-  }, [saveMutation]);
+  }, [saveMutation, queryClient, todayStr]);
 
   // ── Schedule autosave on change ─────────────────────────────────────
   const handleEditorChange = useCallback(
     (_markdown: string) => {
       isDirtyRef.current = true;
-      setSaveStatus("idle"); // clear "Saved" while typing
+      setSaveStatus("idle");
+      handleTypingStart();
 
-      // Clear existing timer
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-
-      // Save after 2s idle
       autosaveTimerRef.current = setTimeout(() => {
         doSave();
       }, AUTOSAVE_DELAY);
     },
-    [doSave]
+    [doSave, handleTypingStart]
   );
 
   // ── Cmd+S force-save ────────────────────────────────────────────────
@@ -154,18 +201,17 @@ export default function JournalPage() {
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       if (savedFadeTimerRef.current) clearTimeout(savedFadeTimerRef.current);
+      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
     };
   }, []);
 
   // ── Entry selection ─────────────────────────────────────────────────
   const handleSelectEntry = useCallback(
     (date: string) => {
-      // Save current entry before switching if dirty
       if (isDirtyRef.current) {
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         doSave();
       }
-
       setSelectedDate(date === todayStr ? undefined : date);
       isDirtyRef.current = false;
       setSaveStatus("idle");
@@ -191,6 +237,9 @@ export default function JournalPage() {
     entriesByMonth.set(key, existing);
   }
 
+  // Should the sidebar chrome be hidden?
+  const chromeHidden = focusMode && isFocused;
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center bg-[var(--bg-base)]">
@@ -201,13 +250,136 @@ export default function JournalPage() {
 
   return (
     <div className="h-full flex overflow-hidden bg-[var(--bg-base)]">
-      {/* ── Entries Sidebar (desktop: always, mobile: toggle) ──────── */}
+      {/* ── Main Editor ────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div
+          className={`flex-shrink-0 flex items-center justify-between px-6 py-4 md:px-8 transition-opacity duration-500 ${
+            chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            {/* Mobile entries toggle */}
+            <button
+              onClick={() => setShowEntries(!showEntries)}
+              className="md:hidden text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                />
+              </svg>
+            </button>
+            <p className="text-xs text-[var(--text-muted)] tracking-wide uppercase">
+              {dateDisplay}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {/* Save status */}
+            <span
+              className={`text-xs transition-opacity duration-300 ${
+                saveStatus === "idle" ? "opacity-0" : "opacity-100"
+              } ${
+                saveStatus === "error"
+                  ? "text-red-400"
+                  : "text-[var(--text-muted)]"
+              }`}
+            >
+              {saveStatus === "saving" && "Saving..."}
+              {saveStatus === "saved" && "Saved"}
+              {saveStatus === "error" && "Save failed — retrying..."}
+            </span>
+
+            {/* Focus mode toggle */}
+            <button
+              onClick={() => setFocusMode(!focusMode)}
+              className={`text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors ${
+                focusMode ? "text-[var(--amber)]" : ""
+              }`}
+              title={focusMode ? "Exit focus mode" : "Focus mode"}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                {focusMode ? (
+                  // Collapse/minimize icon — focus is on
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"
+                  />
+                ) : (
+                  // Expand icon — focus is off
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
+                  />
+                )}
+              </svg>
+            </button>
+
+            {/* Sidebar toggle (desktop) */}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="hidden md:block text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+              title={sidebarCollapsed ? "Show entries" : "Hide entries"}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Editor area */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          <div className="max-w-[680px] mx-auto px-6 pb-24 md:px-8">
+            <MarkdownEditor
+              ref={editorRef}
+              key={selectedDate ?? "today"}
+              initialContent={entry?.content ?? ""}
+              onChange={handleEditorChange}
+              placeholder="Start writing..."
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Entries Sidebar (RIGHT side, collapsible) ────────────── */}
       <aside
         className={`${
           showEntries
             ? "translate-x-0"
-            : "-translate-x-full md:translate-x-0"
-        } fixed md:relative z-20 md:z-auto h-full w-[240px] flex-shrink-0 bg-[var(--bg-card)] border-r border-[var(--border-subtle)] transition-transform duration-200 flex flex-col`}
+            : sidebarCollapsed
+            ? "translate-x-full"
+            : "translate-x-full md:translate-x-0"
+        } fixed md:relative right-0 z-20 md:z-auto h-full w-[240px] flex-shrink-0 bg-[var(--bg-card)] border-l border-[var(--border-subtle)] transition-all duration-300 flex flex-col ${
+          chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
       >
         {/* Sidebar header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
@@ -283,65 +455,6 @@ export default function JournalPage() {
           onClick={() => setShowEntries(false)}
         />
       )}
-
-      {/* ── Main Editor ────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 md:px-8">
-          <div className="flex items-center gap-3">
-            {/* Mobile entries toggle */}
-            <button
-              onClick={() => setShowEntries(!showEntries)}
-              className="md:hidden text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-                />
-              </svg>
-            </button>
-            <p className="text-xs text-[var(--text-muted)] tracking-wide uppercase">
-              {dateDisplay}
-            </p>
-          </div>
-
-          {/* Save status — subtle, Notion-style */}
-          <span
-            className={`text-xs transition-opacity duration-300 ${
-              saveStatus === "idle" ? "opacity-0" : "opacity-100"
-            } ${
-              saveStatus === "error"
-                ? "text-red-400"
-                : "text-[var(--text-muted)]"
-            }`}
-          >
-            {saveStatus === "saving" && "Saving..."}
-            {saveStatus === "saved" && "Saved"}
-            {saveStatus === "error" && "Save failed — retrying..."}
-          </span>
-        </div>
-
-        {/* Editor area */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-[680px] mx-auto px-6 pb-24 md:px-8">
-            <MarkdownEditor
-              ref={editorRef}
-              key={selectedDate ?? "today"}
-              initialContent={entry?.content ?? ""}
-              onChange={handleEditorChange}
-              placeholder="Start writing..."
-            />
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
