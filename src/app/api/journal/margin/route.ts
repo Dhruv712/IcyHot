@@ -7,7 +7,8 @@ import { createHash } from "crypto";
 export const maxDuration = 15;
 
 // Minimum retrieval activation score — memories below this are too tangential
-const MIN_ACTIVATION_SCORE = 0.15;
+// similarity × decayedStrength: ~0.3-0.6 for strong matches, ~0.1-0.3 for moderate
+const MIN_ACTIVATION_SCORE = 0.08;
 
 function buildMarginPrompt(
   paragraph: string,
@@ -148,6 +149,15 @@ export async function POST(request: NextRequest) {
     // 2. Filter to strongly relevant memories only — weak matches cause forced annotations
     const strongMemories = retrieval.memories.filter(
       (m) => m.activationScore >= MIN_ACTIVATION_SCORE,
+    );
+
+    console.log(
+      `[margin] Retrieved ${retrieval.memories.length} memories, ${strongMemories.length} above threshold (${MIN_ACTIVATION_SCORE}). Top scores:`,
+      retrieval.memories.slice(0, 4).map((m) => ({
+        score: m.activationScore.toFixed(3),
+        hop: m.hop,
+        snippet: m.content.slice(0, 60),
+      })),
     );
 
     // No strong memories = nothing worth annotating
