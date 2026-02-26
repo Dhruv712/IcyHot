@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { memoryClusters } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { embedSingle } from "@/lib/memory/embed";
 import { projectToClusters } from "@/lib/memory/cluster";
 
@@ -21,20 +20,22 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // 1. Fetch cached cluster centroids
-    const clusterRows = await db
-      .select()
-      .from(memoryClusters)
-      .where(eq(memoryClusters.userId, session.user.id));
+    // 1. Fetch cached cluster centroids (::text cast — neon driver doesn't return pgvector as JSON)
+    const clusterResult = await db.execute(sql`
+      SELECT centroid::text as centroid_text, pos_x, pos_y
+      FROM memory_clusters
+      WHERE user_id = ${session.user.id}
+    `);
+    const clusterRows = clusterResult.rows as any[];
 
     if (clusterRows.length === 0) {
       return NextResponse.json({ x: 0.5, y: 0.5, similarities: [] });
     }
 
-    const clusters = clusterRows.map((c) => ({
-      centroid: JSON.parse(c.centroid as unknown as string) as number[],
-      x: c.posX,
-      y: c.posY,
+    const clusters = clusterRows.map((c: any) => ({
+      centroid: JSON.parse(c.centroid_text) as number[],
+      x: c.pos_x as number,
+      y: c.pos_y as number,
     }));
 
     // 2. Embed paragraph

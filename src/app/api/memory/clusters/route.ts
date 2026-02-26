@@ -35,10 +35,13 @@ export async function GET() {
 
   if (isFresh) {
     // Return cached clusters + project all memories for starfield
-    const clusterRows = await db
-      .select()
-      .from(memoryClusters)
-      .where(eq(memoryClusters.userId, userId));
+    // Use ::text cast on centroid — neon driver doesn't return pgvector as JSON
+    const clusterResult = await db.execute(sql`
+      SELECT id, centroid::text as centroid_text, label, pos_x, pos_y, member_count
+      FROM memory_clusters
+      WHERE user_id = ${userId}
+    `);
+    const clusterRows = clusterResult.rows as any[];
 
     // Fetch memories for starfield dots
     const memoryRows = await db.execute(sql`
@@ -47,12 +50,12 @@ export async function GET() {
       WHERE user_id = ${userId} AND embedding IS NOT NULL
     `);
 
-    const clusterData = clusterRows.map((c) => ({
-      label: c.label,
-      memberCount: c.memberCount,
-      x: c.posX,
-      y: c.posY,
-      centroid: JSON.parse(c.centroid as unknown as string) as number[],
+    const clusterData = clusterRows.map((c: any) => ({
+      label: c.label as string,
+      memberCount: c.member_count as number,
+      x: c.pos_x as number,
+      y: c.pos_y as number,
+      centroid: JSON.parse(c.centroid_text) as number[],
     }));
 
     const memoryDots = (memoryRows.rows as any[])
