@@ -182,3 +182,72 @@ export function useJournalNewPersonAction() {
     },
   });
 }
+
+// ── Journal Editor Hooks ────────────────────────────────────────────────
+
+export interface JournalEntry {
+  filename: string;
+  content: string;
+  sha: string | null;
+  exists: boolean;
+}
+
+export interface JournalSavePayload {
+  content: string;
+  filename: string;
+  sha: string | null;
+}
+
+export interface JournalSaveResult {
+  sha: string;
+  sync: JournalSyncResult;
+  memory: {
+    filesProcessed: number;
+    memoriesCreated: number;
+    memoriesReinforced: number;
+  };
+}
+
+export function useJournalEntry(date?: string) {
+  const params = new URLSearchParams();
+  if (date) params.set("date", date);
+
+  return useQuery<JournalEntry>({
+    queryKey: ["journal-entry", date ?? "today"],
+    queryFn: async () => {
+      const res = await fetch(`/api/journal/save?${params}`);
+      if (!res.ok) throw new Error("Failed to load journal entry");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useSaveJournalEntry() {
+  const queryClient = useQueryClient();
+
+  return useMutation<JournalSaveResult, Error, JournalSavePayload>({
+    mutationFn: async (payload) => {
+      const res = await fetch("/api/journal/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Save failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journal-entry"] });
+      queryClient.invalidateQueries({ queryKey: ["journal-status"] });
+      queryClient.invalidateQueries({ queryKey: ["journal-insights"] });
+      queryClient.invalidateQueries({ queryKey: ["journal-open-loops"] });
+      queryClient.invalidateQueries({ queryKey: ["journal-new-people"] });
+      queryClient.invalidateQueries({ queryKey: ["graph"] });
+      queryClient.invalidateQueries({ queryKey: ["contact"] });
+      queryClient.invalidateQueries({ queryKey: ["memory-graph"] });
+    },
+  });
+}

@@ -1,7 +1,7 @@
 {
-  "name": "IcyHot",
-  "short_name": "IcyHot",
-  "description": "Physics-based relationship tracker",
+  "name": "Flint & Steel",
+  "short_name": "Flint&Steel",
+  "description": "Memory-driven relationship intelligence",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#0a0a0a",

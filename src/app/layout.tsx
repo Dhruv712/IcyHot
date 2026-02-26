@@ -14,13 +14,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "IcyHot",
-  description: "Physics-based relationship tracker",
+  title: "Flint & Steel",
+  description: "Memory-driven relationship intelligence",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "IcyHot",
+    title: "Flint & Steel",
   },
   icons: {
     icon: [
@@ -37,7 +37,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(!t||t==='system')&&window.matchMedia('(prefers-color-scheme:dark)').matches;document.documentElement.classList.add(d?'dark':'light')}catch(e){document.documentElement.classList.add('dark')}})()` }} />
+      </head>
       <body className={`${inter.className} antialiased`}>
         <Providers>{children}</Providers>
       </body>

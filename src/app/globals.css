@@ -1,29 +1,76 @@
 @import "tailwindcss";
 
+/* Light mode (default) */
 :root {
   /* Backgrounds */
+  --bg-base: #f4f4f5;
+  --bg-card: #ffffff;
+  --bg-elevated: #e8e8ec;
+
+  /* Borders */
+  --border-subtle: #e0e0e6;
+  --border-medium: #d0d0d8;
+
+  /* Text */
+  --text-primary: #1a1a1f;
+  --text-secondary: #6b6b76;
+  --text-muted: #9b9ba6;
+
+  /* Amber accent */
+  --amber: #c49540;
+  --amber-hover: #b8892e;
+  --amber-active: #a67d22;
+  --amber-ghost-bg: rgba(196, 149, 64, 0.12);
+
+  /* Semantic */
+  --success: #5cb870;
+  --danger: #c45c5c;
+}
+
+/* Dark mode */
+.dark {
   --bg-base: #0a0a0f;
   --bg-card: #111118;
   --bg-elevated: #1a1a24;
 
-  /* Borders */
   --border-subtle: #1e1e2a;
   --border-medium: #2a2a38;
 
-  /* Text */
   --text-primary: #f5f0e8;
   --text-secondary: #a09888;
   --text-muted: #5c5650;
 
-  /* Amber accent */
   --amber: #d4a853;
   --amber-hover: #c49540;
   --amber-active: #b8892e;
   --amber-ghost-bg: rgba(212, 168, 83, 0.12);
 
-  /* Semantic */
   --success: #5cb870;
   --danger: #c45c5c;
+}
+
+/* Respect system preference when no explicit class is set */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --bg-base: #0a0a0f;
+    --bg-card: #111118;
+    --bg-elevated: #1a1a24;
+
+    --border-subtle: #1e1e2a;
+    --border-medium: #2a2a38;
+
+    --text-primary: #f5f0e8;
+    --text-secondary: #a09888;
+    --text-muted: #5c5650;
+
+    --amber: #d4a853;
+    --amber-hover: #c49540;
+    --amber-active: #b8892e;
+    --amber-ghost-bg: rgba(212, 168, 83, 0.12);
+
+    --success: #5cb870;
+    --danger: #c45c5c;
+  }
 }
 
 html,

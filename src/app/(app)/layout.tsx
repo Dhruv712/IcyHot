@@ -80,12 +80,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <div className="h-screen flex items-center justify-center bg-[var(--bg-base)]">
         <div className="text-center">
-          <h1 className="text-4xl font-bold mb-2">
-            <span className="text-[var(--amber)]">Icy</span>
-            <span className="text-[var(--text-primary)]">Hot</span>
+          <h1 className="text-4xl font-bold mb-2 text-[var(--amber)]">
+            Flint & Steel
           </h1>
           <p className="text-[var(--text-secondary)] mb-6">
-            See your relationships. Feel the temperature.
+            Strike a spark. See what lights up.
           </p>
           <button
             onClick={() => signIn("google")}
