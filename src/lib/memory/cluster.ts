@@ -373,7 +373,9 @@ export function layoutClusters(clusters: MemoryCluster[]): void {
 
 // ── Projection ─────────────────────────────────────────────────────────
 
-const SHARPNESS = 3; // Exponent to sharpen similarity weights
+// Softmax temperature: higher = more discriminative.
+// With T=20, a sim diff of 0.05 → weight ratio of ~2.7x
+const TEMPERATURE = 20;
 
 export function projectToClusters(
   embedding: number[],
@@ -383,8 +385,10 @@ export function projectToClusters(
 
   const sims = clusters.map((c) => cosineSimilarity(embedding, c.centroid));
 
-  // Raise to power to sharpen — nearest cluster dominates pull
-  const weights = sims.map((s) => Math.pow(Math.max(0, s), SHARPNESS));
+  // Softmax weighting: amplifies small similarity differences.
+  // Subtract max for numerical stability, then exp(sim * temperature).
+  const maxSim = Math.max(...sims);
+  const weights = sims.map((s) => Math.exp((s - maxSim) * TEMPERATURE));
   const totalWeight = weights.reduce((a, b) => a + b, 0) || 1;
 
   const x =
