@@ -6,6 +6,9 @@ import { createHash } from "crypto";
 
 export const maxDuration = 15;
 
+// Minimum retrieval activation score — memories below this are too tangential
+const MIN_ACTIVATION_SCORE = 0.15;
+
 function buildMarginPrompt(
   paragraph: string,
   fullEntry: string,
@@ -16,50 +19,50 @@ function buildMarginPrompt(
   const entryTruncated =
     fullEntry.length > 1500 ? fullEntry.slice(0, 1500) + "..." : fullEntry;
 
-  return `You are a margin annotator for a personal journal. You write SHORT notes in the margin — like a sharp coach reading over someone's shoulder. You have access to their past memories.
+  return `You are a margin annotator for a personal journal. You have access to their past memories. Your job: produce 0 or 1 margin annotations. Most of the time you produce 0.
 
-TODAY'S DATE: ${entryDate}
+TODAY: ${entryDate}
 
-FULL ENTRY SO FAR:
+ENTRY SO FAR:
 ${entryTruncated}
 
 PARAGRAPH JUST WRITTEN:
 "${paragraph}"
 
-PAST MEMORIES (from their journal/calendar history):
-${memoriesContext || "(no relevant memories found)"}
+PAST MEMORIES:
+${memoriesContext || "(none)"}
 
-PATTERNS/IMPLICATIONS FROM THEIR HISTORY:
+PATTERNS:
 ${implicationsContext || "(none)"}
 
-YOUR JOB: Read the paragraph. Check it against the past memories. Produce 0-2 margin annotations.
+WHEN TO ANNOTATE (must meet ALL criteria):
+- There is a DIRECT, OBVIOUS connection between the paragraph and a specific memory
+- The connection reveals something the writer likely hasn't noticed — a contradiction, a blind spot, a pattern
+- A smart friend reading both would independently spot the same thing
 
-TWO TYPES:
-1. GHOST QUESTION — A probing question they haven't asked themselves. Must reference a specific memory. Not generic. Not "have you considered" — more like "You said X on [date]. What changed?"
-2. TENSION — Flag a specific contradiction between what they're writing now and what they wrote/did before. Cite the date and what they said. Not a gentle nudge — name the contradiction directly.
+WHEN TO STAY SILENT (return empty):
+- The memory is only tangentially related (same person mentioned ≠ meaningful connection)
+- You'd be comparing two unrelated situations just because they share a name or context
+- The question you'd ask ends with something generic like "what does that tell you?" or "how did that feel?"
+- You're reaching. If you have to stretch to make the connection, it's not worth making.
+- The paragraph is mundane, logistical, or descriptive without any tension
 
-RULES:
-- 1 sentence each. Max 20 words. No exceptions.
-- Ground EVERY annotation in a specific memory with a date. If you can't cite something specific, don't write it.
-- No therapy-speak. No "perhaps." No "it's worth noting." No "have you considered." Say the thing directly.
-- If the paragraph is mundane, logistical, or has no interesting tension with past memories: return EMPTY. Most paragraphs should return nothing. Only fire when something genuinely interesting jumps out.
-- Name names. Cite dates. Be specific or be silent.
-- Tone: direct, warm, slightly provocative. A smart friend's margin scribble, not a therapist's note.
-- Never compliment or affirm what they wrote. You're not here to validate — you're here to push.
+ANNOTATION TYPES:
+1. GHOST QUESTION — Point out something specific they said/did before that directly contradicts or complicates what they just wrote. "You told Josh on 2/10 you'd stop doing X — what happened?"
+2. TENSION — Name a concrete contradiction. "On 2/14 you said X. Now you're saying Y."
 
-Return ONLY valid JSON:
-{
-  "annotations": [
-    {
-      "type": "ghost_question" | "tension",
-      "text": "The annotation — one sentence, specific, grounded",
-      "memoryDate": "YYYY-MM-DD of the cited memory",
-      "memorySnippet": "Brief excerpt from the memory being referenced (10-15 words)"
-    }
-  ]
-}
+STRICT RULES:
+- Max 1 annotation. 1 sentence. Under 20 words.
+- The memory must DIRECTLY relate to the paragraph's actual point, not just share a person or topic.
+- No therapy-speak. No "perhaps." No "have you considered." No "what does that tell you."
+- Never compare two unrelated interactions just because they involve overlapping people.
+- Never annotate unless you'd bet money a thoughtful friend would notice the same thing.
+- When in doubt, return empty. Empty is always better than forced.
 
-If nothing interesting: {"annotations": []}`;
+JSON only:
+{"annotations": [{"type": "ghost_question" | "tension", "text": "...", "memoryDate": "YYYY-MM-DD", "memorySnippet": "..."}]}
+
+Nothing interesting? {"annotations": []}`;
 }
 
 interface ParsedAnnotation {
@@ -91,7 +94,7 @@ function parseAnnotations(
     return (parsed.annotations || [])
       .filter((a) => a.text && a.text.length > 5 && a.text.length < 200)
       .filter((a) => a.type === "ghost_question" || a.type === "tension")
-      .slice(0, 2)
+      .slice(0, 1) // Hard cap: 1 annotation per paragraph
       .map((a) => ({
         id: crypto.randomUUID(),
         type: a.type as "ghost_question" | "tension",
@@ -142,22 +145,24 @@ export async function POST(request: NextRequest) {
       },
     );
 
-    // 2. No memories = nothing to ground on
-    if (
-      retrieval.memories.length === 0 &&
-      retrieval.implications.length === 0
-    ) {
+    // 2. Filter to strongly relevant memories only — weak matches cause forced annotations
+    const strongMemories = retrieval.memories.filter(
+      (m) => m.activationScore >= MIN_ACTIVATION_SCORE,
+    );
+
+    // No strong memories = nothing worth annotating
+    if (strongMemories.length === 0 && retrieval.implications.length === 0) {
       return NextResponse.json({ annotations: [], paragraphHash });
     }
 
-    // 3. Build context
-    const memoriesContext = retrieval.memories
-      .slice(0, 6)
+    // 3. Build context — only pass strong memories (max 4, not 6)
+    const memoriesContext = strongMemories
+      .slice(0, 4)
       .map((m) => `[${m.sourceDate}] ${m.content}`)
       .join("\n");
 
     const implicationsContext = retrieval.implications
-      .slice(0, 3)
+      .slice(0, 2)
       .map((i) => `- ${i.content}`)
       .join("\n");
 
