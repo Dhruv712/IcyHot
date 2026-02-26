@@ -419,6 +419,19 @@ export const provocations = pgTable(
   ]
 );
 
+export const memoryClusters = pgTable("memory_clusters", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  centroid: vector("centroid", { dimensions: 1024 }).notNull(),
+  label: text("label").notNull(),
+  posX: real("pos_x").notNull(),
+  posY: real("pos_y").notNull(),
+  memberCount: integer("member_count").notNull(),
+  computedAt: timestamp("computed_at").defaultNow().notNull(),
+});
+
 export const memorySyncState = pgTable("memory_sync_state", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: uuid("user_id")

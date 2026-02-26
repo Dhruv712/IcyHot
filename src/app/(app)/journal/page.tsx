@@ -12,6 +12,8 @@ import dynamic from "next/dynamic";
 import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
 import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
+import { useGravityWell } from "@/hooks/useGravityWell";
+import GravityWellMap from "@/components/journal/GravityWellMap";
 
 const MarkdownEditor = dynamic(
   () => import("@/components/journal/MarkdownEditor"),
@@ -31,6 +33,7 @@ export default function JournalPage() {
   );
   const [showEntries, setShowEntries] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarMode, setSidebarMode] = useState<"entries" | "map">("entries");
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
 
@@ -42,15 +45,25 @@ export default function JournalPage() {
   const saveMutation = useSaveJournalEntry();
   const {
     annotations: marginAnnotations,
-    handleParagraphChange,
+    handleParagraphChange: handleMarginParagraph,
     dismissAnnotation,
   } = useMarginIntelligence({ entryDate, enabled: !isLoading });
+
+  const {
+    clusters,
+    memoryDots,
+    currentPosition,
+    trail,
+    handleParagraphChange: handleGravityParagraph,
+  } = useGravityWell({ entryDate, enabled: !isLoading });
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sidebarContentRef = useRef<HTMLDivElement>(null);
+  const [sidebarSize, setSidebarSize] = useState({ width: 240, height: 400 });
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mouseIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,14 +216,29 @@ export default function JournalPage() {
     [doSave]
   );
 
-  // ── Margin intelligence: paragraph change → debounced annotation ───
+  // ── Paragraph change → margin intelligence + gravity well ──────────
   const handleActiveParagraph = useCallback(
     (p: { index: number; text: string }) => {
       const fullMd = editorRef.current?.getMarkdown() ?? "";
-      handleParagraphChange(p, fullMd);
+      handleMarginParagraph(p, fullMd);
+      handleGravityParagraph(p);
     },
-    [handleParagraphChange]
+    [handleMarginParagraph, handleGravityParagraph]
   );
+
+  // ── Measure sidebar content area for GravityWellMap ───────────────
+  useEffect(() => {
+    const el = sidebarContentRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setSidebarSize({
+        width: Math.round(entry.contentRect.width),
+        height: Math.round(entry.contentRect.height),
+      });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // ── Cmd+S force-save ────────────────────────────────────────────────
   useEffect(() => {
@@ -400,23 +428,45 @@ export default function JournalPage() {
       <aside
         className={`hidden md:flex h-full flex-shrink-0 bg-[var(--bg-card)] border-l border-[var(--border-subtle)] transition-all duration-200 flex-col ${
           sidebarOpen ? "w-[240px]" : "w-[44px]"
-        } ${chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"}`}
+        } ${chromeHidden ? (sidebarMode === "map" ? "opacity-40" : "opacity-0 pointer-events-none") : "opacity-100"}`}
         style={{ transition: "width 200ms, opacity 500ms" }}
       >
-        {/* Sidebar header with collapse chevron */}
+        {/* Sidebar header with mode toggle + collapse chevron */}
         <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--border-subtle)]">
           {sidebarOpen && (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <span className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
-                Entries
-              </span>
-              <button
-                onClick={() => handleSelectEntry(todayStr)}
-                className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors ml-auto"
-                title="Go to today"
-              >
-                Today
-              </button>
+              <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide">
+                <button
+                  onClick={() => setSidebarMode("entries")}
+                  className={`transition-colors ${
+                    sidebarMode === "entries"
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  Entries
+                </button>
+                <span className="text-[var(--text-muted)]">/</span>
+                <button
+                  onClick={() => setSidebarMode("map")}
+                  className={`transition-colors ${
+                    sidebarMode === "map"
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  Map
+                </button>
+              </div>
+              {sidebarMode === "entries" && (
+                <button
+                  onClick={() => handleSelectEntry(todayStr)}
+                  className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors ml-auto"
+                  title="Go to today"
+                >
+                  Today
+                </button>
+              )}
             </div>
           )}
           <button
@@ -448,55 +498,70 @@ export default function JournalPage() {
           </button>
         </div>
 
-        {/* Entries list (hidden when collapsed) */}
+        {/* Sidebar content (hidden when collapsed) */}
         {sidebarOpen && (
-          <div className="flex-1 overflow-y-auto py-2">
-            {Array.from(entriesByMonth.entries()).map(
-              ([month, monthEntries]) => (
-                <div key={month}>
-                  <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
-                    {month}
+          <div ref={sidebarContentRef} className="flex-1 overflow-hidden">
+            {sidebarMode === "entries" ? (
+              <div className="h-full overflow-y-auto py-2">
+                {Array.from(entriesByMonth.entries()).map(
+                  ([month, monthEntries]) => (
+                    <div key={month}>
+                      <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                        {month}
+                      </div>
+                      {monthEntries!.map((e) => {
+                        const isActive =
+                          selectedDate === e.date ||
+                          (!selectedDate && e.date === todayStr);
+                        const d = new Date(e.date + "T12:00:00");
+                        const day = d.getDate();
+                        const weekday = d.toLocaleDateString("en-US", {
+                          weekday: "short",
+                        });
+
+                        return (
+                          <button
+                            key={e.date}
+                            onClick={() => handleSelectEntry(e.date)}
+                            className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
+                              isActive
+                                ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                                : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                            }`}
+                          >
+                            <span
+                              className={`text-lg font-light w-7 text-right ${
+                                isActive
+                                  ? "text-[var(--amber)]"
+                                  : "text-[var(--text-muted)]"
+                              }`}
+                            >
+                              {day}
+                            </span>
+                            <span className="text-xs">{weekday}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )
+                )}
+
+                {entries.length === 0 && (
+                  <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
+                    No entries yet
                   </div>
-                  {monthEntries!.map((e) => {
-                    const isActive =
-                      selectedDate === e.date ||
-                      (!selectedDate && e.date === todayStr);
-                    const d = new Date(e.date + "T12:00:00");
-                    const day = d.getDate();
-                    const weekday = d.toLocaleDateString("en-US", {
-                      weekday: "short",
-                    });
-
-                    return (
-                      <button
-                        key={e.date}
-                        onClick={() => handleSelectEntry(e.date)}
-                        className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
-                          isActive
-                            ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
-                            : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                        }`}
-                      >
-                        <span
-                          className={`text-lg font-light w-7 text-right ${
-                            isActive
-                              ? "text-[var(--amber)]"
-                              : "text-[var(--text-muted)]"
-                          }`}
-                        >
-                          {day}
-                        </span>
-                        <span className="text-xs">{weekday}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )
-            )}
-
-            {entries.length === 0 && (
-              <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
-                No entries yet
+                )}
+              </div>
+            ) : (
+              <div className="h-full flex items-center justify-center p-2">
+                <GravityWellMap
+                  clusters={clusters}
+                  memoryDots={memoryDots}
+                  currentPosition={currentPosition}
+                  trail={trail}
+                  width={sidebarSize.width - 16}
+                  height={sidebarSize.height - 16}
+                />
               </div>
             )}
           </div>
