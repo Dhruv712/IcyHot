@@ -17,7 +17,7 @@ const MarkdownEditor = dynamic(
 );
 
 const AUTOSAVE_DELAY = 2_000;
-const FOCUS_FADE_DELAY = 2_000; // ms after mouse stops before re-fading
+const FOCUS_MOUSE_IDLE = 2_000; // re-fade after mouse stops for 2s
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -28,9 +28,9 @@ export default function JournalPage() {
     undefined
   );
   const [showEntries, setShowEntries] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
+  const [chromeHidden, setChromeHidden] = useState(false);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const entryDate = selectedDate ?? todayStr;
@@ -42,18 +42,24 @@ export default function JournalPage() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mouseIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDirtyRef = useRef(false);
   const isSavingRef = useRef(false);
   const entryDateRef = useRef(entryDate);
+  const focusModeRef = useRef(focusMode);
 
-  // Keep entryDate ref in sync
+  // Keep refs in sync
   useEffect(() => {
     entryDateRef.current = entryDate;
   }, [entryDate]);
+  useEffect(() => {
+    focusModeRef.current = focusMode;
+    if (!focusMode) setChromeHidden(false);
+  }, [focusMode]);
 
   // Reset dirty state when entry loads
   useEffect(() => {
@@ -68,35 +74,46 @@ export default function JournalPage() {
     scrollRef.current?.scrollTo(0, 0);
   }, [entryDate]);
 
-  // ── Focus mode ────────────────────────────────────────────────────
-  const handleTypingStart = useCallback(() => {
-    if (!focusMode) return;
-    setIsFocused(true);
-    if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
-  }, [focusMode]);
-
+  // ── Focus mode: keydown on editor container ─────────────────────────
+  // Uses a direct DOM listener so it doesn't depend on Tiptap's stale closures
   useEffect(() => {
-    if (!focusMode) {
-      setIsFocused(false);
-      return;
-    }
+    const container = editorContainerRef.current;
+    if (!container) return;
+
+    const handleKeyDown = () => {
+      if (focusModeRef.current) {
+        setChromeHidden(true);
+        if (mouseIdleTimerRef.current)
+          clearTimeout(mouseIdleTimerRef.current);
+      }
+    };
+
+    container.addEventListener("keydown", handleKeyDown);
+    return () => container.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // ── Focus mode: mouse movement reveals chrome ──────────────────────
+  useEffect(() => {
+    if (!focusMode) return;
 
     const handleMouseMove = () => {
-      setIsFocused(false);
-      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
-      focusTimerRef.current = setTimeout(() => {
-        // Only re-fade if editor is focused (user went back to typing)
+      setChromeHidden(false);
+      if (mouseIdleTimerRef.current)
+        clearTimeout(mouseIdleTimerRef.current);
+      mouseIdleTimerRef.current = setTimeout(() => {
+        // Re-fade only if the editor is still focused
         const active = document.activeElement;
-        const isEditorFocused =
-          active?.closest(".journal-editor-content") !== null;
-        if (isEditorFocused) setIsFocused(true);
-      }, FOCUS_FADE_DELAY);
+        if (active?.closest(".journal-editor-content")) {
+          setChromeHidden(true);
+        }
+      }, FOCUS_MOUSE_IDLE);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
-      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+      if (mouseIdleTimerRef.current)
+        clearTimeout(mouseIdleTimerRef.current);
     };
   }, [focusMode]);
 
@@ -128,7 +145,7 @@ export default function JournalPage() {
           isSavingRef.current = false;
           setSaveStatus("saved");
 
-          // Update the react-query cache so navigating back shows latest content
+          // Update the react-query cache so navigating back shows latest
           const queryKey = [
             "journal-entry",
             savingDate === todayStr ? "today" : savingDate,
@@ -160,14 +177,13 @@ export default function JournalPage() {
     (_markdown: string) => {
       isDirtyRef.current = true;
       setSaveStatus("idle");
-      handleTypingStart();
 
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = setTimeout(() => {
         doSave();
       }, AUTOSAVE_DELAY);
     },
-    [doSave, handleTypingStart]
+    [doSave]
   );
 
   // ── Cmd+S force-save ────────────────────────────────────────────────
@@ -201,7 +217,7 @@ export default function JournalPage() {
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       if (savedFadeTimerRef.current) clearTimeout(savedFadeTimerRef.current);
-      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+      if (mouseIdleTimerRef.current) clearTimeout(mouseIdleTimerRef.current);
     };
   }, []);
 
@@ -236,9 +252,6 @@ export default function JournalPage() {
     existing.push(e);
     entriesByMonth.set(key, existing);
   }
-
-  // Should the sidebar chrome be hidden?
-  const chromeHidden = focusMode && isFocused;
 
   if (isLoading) {
     return (
@@ -302,8 +315,10 @@ export default function JournalPage() {
             {/* Focus mode toggle */}
             <button
               onClick={() => setFocusMode(!focusMode)}
-              className={`text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors ${
-                focusMode ? "text-[var(--amber)]" : ""
+              className={`transition-colors ${
+                focusMode
+                  ? "text-[var(--amber)] hover:text-[var(--amber-hover)]"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
               }`}
               title={focusMode ? "Exit focus mode" : "Focus mode"}
             >
@@ -315,14 +330,12 @@ export default function JournalPage() {
                 strokeWidth={1.5}
               >
                 {focusMode ? (
-                  // Collapse/minimize icon — focus is on
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"
                   />
                 ) : (
-                  // Expand icon — focus is off
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -331,33 +344,15 @@ export default function JournalPage() {
                 )}
               </svg>
             </button>
-
-            {/* Sidebar toggle (desktop) */}
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="hidden md:block text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-              title={sidebarCollapsed ? "Show entries" : "Hide entries"}
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"
-                />
-              </svg>
-            </button>
           </div>
         </div>
 
         {/* Editor area */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
-          <div className="max-w-[680px] mx-auto px-6 pb-24 md:px-8">
+          <div
+            ref={editorContainerRef}
+            className="max-w-[680px] mx-auto px-6 pb-24 md:px-8"
+          >
             <MarkdownEditor
               ref={editorRef}
               key={selectedDate ?? "today"}
@@ -369,91 +364,177 @@ export default function JournalPage() {
         </div>
       </div>
 
-      {/* ── Entries Sidebar (RIGHT side, collapsible) ────────────── */}
+      {/* ── Entries Sidebar (RIGHT, with collapse chevron) ──────── */}
       <aside
-        className={`${
-          showEntries
-            ? "translate-x-0"
-            : sidebarCollapsed
-            ? "translate-x-full"
-            : "translate-x-full md:translate-x-0"
-        } fixed md:relative right-0 z-20 md:z-auto h-full w-[240px] flex-shrink-0 bg-[var(--bg-card)] border-l border-[var(--border-subtle)] transition-all duration-300 flex flex-col ${
-          chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
-        }`}
+        className={`hidden md:flex h-full flex-shrink-0 bg-[var(--bg-card)] border-l border-[var(--border-subtle)] transition-all duration-200 flex-col ${
+          sidebarOpen ? "w-[240px]" : "w-[44px]"
+        } ${chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"}`}
+        style={{ transition: "width 200ms, opacity 500ms" }}
       >
-        {/* Sidebar header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
-          <span className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
-            Entries
-          </span>
+        {/* Sidebar header with collapse chevron */}
+        <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--border-subtle)]">
+          {sidebarOpen && (
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
+                Entries
+              </span>
+              <button
+                onClick={() => handleSelectEntry(todayStr)}
+                className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors ml-auto"
+                title="Go to today"
+              >
+                Today
+              </button>
+            </div>
+          )}
           <button
-            onClick={() => handleSelectEntry(todayStr)}
-            className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors"
-            title="Go to today"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors p-1"
+            title={sidebarOpen ? "Collapse entries" : "Expand entries"}
           >
-            Today
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              {sidebarOpen ? (
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 5l7 7-7 7"
+                />
+              ) : (
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15 19l-7-7 7-7"
+                />
+              )}
+            </svg>
           </button>
         </div>
 
-        {/* Entries list */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {Array.from(entriesByMonth.entries()).map(
-            ([month, monthEntries]) => (
-              <div key={month}>
-                <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
-                  {month}
-                </div>
-                {monthEntries!.map((e) => {
-                  const isActive =
-                    selectedDate === e.date ||
-                    (!selectedDate && e.date === todayStr);
-                  const d = new Date(e.date + "T12:00:00");
-                  const day = d.getDate();
-                  const weekday = d.toLocaleDateString("en-US", {
-                    weekday: "short",
-                  });
+        {/* Entries list (hidden when collapsed) */}
+        {sidebarOpen && (
+          <div className="flex-1 overflow-y-auto py-2">
+            {Array.from(entriesByMonth.entries()).map(
+              ([month, monthEntries]) => (
+                <div key={month}>
+                  <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                    {month}
+                  </div>
+                  {monthEntries!.map((e) => {
+                    const isActive =
+                      selectedDate === e.date ||
+                      (!selectedDate && e.date === todayStr);
+                    const d = new Date(e.date + "T12:00:00");
+                    const day = d.getDate();
+                    const weekday = d.toLocaleDateString("en-US", {
+                      weekday: "short",
+                    });
 
-                  return (
-                    <button
-                      key={e.date}
-                      onClick={() => handleSelectEntry(e.date)}
-                      className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
-                        isActive
-                          ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
-                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                      }`}
-                    >
-                      <span
-                        className={`text-lg font-light w-7 text-right ${
+                    return (
+                      <button
+                        key={e.date}
+                        onClick={() => handleSelectEntry(e.date)}
+                        className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
                           isActive
-                            ? "text-[var(--amber)]"
-                            : "text-[var(--text-muted)]"
+                            ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                            : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
                         }`}
                       >
-                        {day}
-                      </span>
-                      <span className="text-xs">{weekday}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )
-          )}
+                        <span
+                          className={`text-lg font-light w-7 text-right ${
+                            isActive
+                              ? "text-[var(--amber)]"
+                              : "text-[var(--text-muted)]"
+                          }`}
+                        >
+                          {day}
+                        </span>
+                        <span className="text-xs">{weekday}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            )}
 
-          {entries.length === 0 && (
-            <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
-              No entries yet
-            </div>
-          )}
-        </div>
+            {entries.length === 0 && (
+              <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
+                No entries yet
+              </div>
+            )}
+          </div>
+        )}
       </aside>
 
-      {/* Mobile overlay backdrop */}
+      {/* ── Mobile entries sidebar (slides from right) ─────────── */}
       {showEntries && (
-        <div
-          className="fixed inset-0 z-10 bg-black/30 md:hidden"
-          onClick={() => setShowEntries(false)}
-        />
+        <>
+          <div
+            className="fixed inset-0 z-10 bg-black/30 md:hidden"
+            onClick={() => setShowEntries(false)}
+          />
+          <aside className="fixed right-0 z-20 h-full w-[260px] bg-[var(--bg-card)] border-l border-[var(--border-subtle)] flex flex-col md:hidden animate-slide-in-right">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
+              <span className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
+                Entries
+              </span>
+              <button
+                onClick={() => handleSelectEntry(todayStr)}
+                className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors"
+              >
+                Today
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto py-2">
+              {Array.from(entriesByMonth.entries()).map(
+                ([month, monthEntries]) => (
+                  <div key={month}>
+                    <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                      {month}
+                    </div>
+                    {monthEntries!.map((e) => {
+                      const isActive =
+                        selectedDate === e.date ||
+                        (!selectedDate && e.date === todayStr);
+                      const d = new Date(e.date + "T12:00:00");
+                      const day = d.getDate();
+                      const weekday = d.toLocaleDateString("en-US", {
+                        weekday: "short",
+                      });
+                      return (
+                        <button
+                          key={e.date}
+                          onClick={() => handleSelectEntry(e.date)}
+                          className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
+                            isActive
+                              ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                              : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                          }`}
+                        >
+                          <span
+                            className={`text-lg font-light w-7 text-right ${
+                              isActive
+                                ? "text-[var(--amber)]"
+                                : "text-[var(--text-muted)]"
+                            }`}
+                          >
+                            {day}
+                          </span>
+                          <span className="text-xs">{weekday}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )
+              )}
+            </div>
+          </aside>
+        </>
       )}
     </div>
   );
