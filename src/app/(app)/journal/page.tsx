@@ -10,6 +10,8 @@ import {
 } from "@/hooks/useJournal";
 import dynamic from "next/dynamic";
 import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
+import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
+import MarginAnnotations from "@/components/journal/MarginAnnotations";
 
 const MarkdownEditor = dynamic(
   () => import("@/components/journal/MarkdownEditor"),
@@ -38,6 +40,11 @@ export default function JournalPage() {
   const { data: entry, isLoading } = useJournalEntry(selectedDate);
   const { data: entriesData } = useJournalEntries();
   const saveMutation = useSaveJournalEntry();
+  const {
+    annotations: marginAnnotations,
+    handleParagraphChange,
+    dismissAnnotation,
+  } = useMarginIntelligence({ entryDate, enabled: !isLoading });
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
@@ -194,6 +201,15 @@ export default function JournalPage() {
       }, AUTOSAVE_DELAY);
     },
     [doSave]
+  );
+
+  // ── Margin intelligence: paragraph change → debounced annotation ───
+  const handleActiveParagraph = useCallback(
+    (p: { index: number; text: string }) => {
+      const fullMd = editorRef.current?.getMarkdown() ?? "";
+      handleParagraphChange(p, fullMd);
+    },
+    [handleParagraphChange]
   );
 
   // ── Cmd+S force-save ────────────────────────────────────────────────
@@ -361,14 +377,20 @@ export default function JournalPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           <div
             ref={editorContainerRef}
-            className="max-w-[680px] mx-auto px-6 pb-24 md:px-8"
+            className="relative max-w-[680px] mx-auto px-6 pb-24 md:px-8"
           >
             <MarkdownEditor
               ref={editorRef}
               key={selectedDate ?? "today"}
               initialContent={entry?.content ?? ""}
               onChange={handleEditorChange}
+              onActiveParagraph={handleActiveParagraph}
               placeholder="Start writing..."
+            />
+            <MarginAnnotations
+              annotations={marginAnnotations}
+              editorElement={editorContainerRef.current}
+              onDismiss={dismissAnnotation}
             />
           </div>
         </div>

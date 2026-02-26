@@ -20,11 +20,12 @@ function getMarkdown(editor: Editor): string {
 interface MarkdownEditorProps {
   initialContent: string;
   onChange?: (markdown: string) => void;
+  onActiveParagraph?: (paragraph: { index: number; text: string }) => void;
   placeholder?: string;
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
-  function MarkdownEditor({ initialContent, onChange, placeholder = "Start writing..." }, ref) {
+  function MarkdownEditor({ initialContent, onChange, onActiveParagraph, placeholder = "Start writing..." }, ref) {
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
@@ -51,6 +52,17 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
       },
       onUpdate: ({ editor }) => {
         onChange?.(getMarkdown(editor));
+
+        if (onActiveParagraph) {
+          try {
+            const { $head } = editor.state.selection;
+            const paragraphText = $head.parent.textContent;
+            const paragraphIndex = editor.state.doc.resolve($head.pos).index(0);
+            onActiveParagraph({ index: paragraphIndex, text: paragraphText });
+          } catch {
+            // ProseMirror position errors during rapid edits — safe to ignore
+          }
+        }
       },
     });
 
