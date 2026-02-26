@@ -208,6 +208,24 @@ export interface JournalSaveResult {
   };
 }
 
+export interface JournalEntryListItem {
+  filename: string;
+  date: string;
+  name: string;
+}
+
+export function useJournalEntries() {
+  return useQuery<{ entries: JournalEntryListItem[] }>({
+    queryKey: ["journal-entries"],
+    queryFn: async () => {
+      const res = await fetch("/api/journal/entries");
+      if (!res.ok) throw new Error("Failed to list journal entries");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useJournalEntry(date?: string) {
   const params = new URLSearchParams();
   if (date) params.set("date", date);

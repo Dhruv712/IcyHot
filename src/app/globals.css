@@ -99,3 +99,147 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ── Tiptap Journal Editor ────────────────────────────────────────────── */
+
+.journal-editor-content {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  line-height: 1.8;
+  color: var(--text-primary);
+  outline: none;
+  min-height: calc(100vh - 140px);
+}
+
+.journal-editor-content > * + * {
+  margin-top: 0.75em;
+}
+
+/* Placeholder */
+.journal-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-muted);
+  pointer-events: none;
+  height: 0;
+}
+
+/* Headings */
+.journal-editor-content h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  color: var(--text-primary);
+}
+
+.journal-editor-content h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1.3em;
+  margin-bottom: 0.4em;
+  color: var(--text-primary);
+}
+
+.journal-editor-content h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-top: 1.2em;
+  margin-bottom: 0.3em;
+  color: var(--text-secondary);
+}
+
+/* Paragraphs */
+.journal-editor-content p {
+  margin-bottom: 0.5em;
+}
+
+/* Bold & italic */
+.journal-editor-content strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.journal-editor-content em {
+  font-style: italic;
+}
+
+/* Lists */
+.journal-editor-content ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+
+.journal-editor-content ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+}
+
+.journal-editor-content li {
+  margin-bottom: 0.25em;
+}
+
+.journal-editor-content li p {
+  margin: 0;
+}
+
+/* Blockquote */
+.journal-editor-content blockquote,
+.journal-editor-content .journal-blockquote {
+  border-left: 3px solid var(--amber);
+  padding-left: 1em;
+  margin-left: 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Code (inline) */
+.journal-editor-content code {
+  font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+  font-size: 0.875em;
+  background: var(--bg-elevated);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+
+/* Code block */
+.journal-editor-content pre,
+.journal-editor-content .journal-code-block {
+  font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+  font-size: 0.85em;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1em;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+.journal-editor-content pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* Horizontal rule */
+.journal-editor-content hr,
+.journal-editor-content .journal-hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 2em 0;
+}
+
+/* Links */
+.journal-editor-content a {
+  color: var(--amber);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Selection */
+.journal-editor-content ::selection {
+  background: var(--amber-ghost-bg);
+}
