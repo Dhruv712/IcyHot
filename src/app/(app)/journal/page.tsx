@@ -15,28 +15,50 @@ const MarkdownEditor = dynamic(
   { ssr: false }
 );
 
+const AUTOSAVE_DELAY = 2_000; // 2s after last keystroke
+const PROCESS_DELAY = 30_000; // 30s idle before triggering memory processing
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
 export default function JournalPage() {
-  const [selectedDate, setSelectedDate] = useState<string | undefined>(undefined);
+  const [selectedDate, setSelectedDate] = useState<string | undefined>(
+    undefined
+  );
   const [showEntries, setShowEntries] = useState(false);
 
   const { data: entry, isLoading } = useJournalEntry(selectedDate);
   const { data: entriesData } = useJournalEntries();
   const saveMutation = useSaveJournalEntry();
 
-  const [isDirty, setIsDirty] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [currentSha, setCurrentSha] = useState<string | null>(null);
-  const [showToast, setShowToast] = useState(false);
-  const [latestMarkdown, setLatestMarkdown] = useState("");
+  const [hasProcessed, setHasProcessed] = useState(false);
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
+  const latestMarkdownRef = useRef("");
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const processTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDirtyRef = useRef(false);
+  const isSavingRef = useRef(false);
+  const currentShaRef = useRef<string | null>(null);
+  const entryFilenameRef = useRef<string | null>(null);
 
-  // Sync SHA when entry loads
+  // Keep refs in sync
+  useEffect(() => {
+    currentShaRef.current = currentSha;
+  }, [currentSha]);
+
+  // Sync SHA and filename when entry loads
   useEffect(() => {
     if (entry) {
       setCurrentSha(entry.sha);
-      setIsDirty(false);
-      setLatestMarkdown(entry.content);
+      currentShaRef.current = entry.sha;
+      entryFilenameRef.current = entry.filename;
+      isDirtyRef.current = false;
+      latestMarkdownRef.current = entry.content;
+      setSaveStatus("idle");
+      setHasProcessed(false);
     }
   }, [entry]);
 
@@ -52,57 +74,150 @@ export default function JournalPage() {
   });
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const isToday = !selectedDate || selectedDate === todayStr;
 
-  const handleEditorChange = useCallback((markdown: string) => {
-    setLatestMarkdown(markdown);
-    setIsDirty(true);
-  }, []);
+  // ── Core save function ──────────────────────────────────────────────
+  const doSave = useCallback(
+    (process: boolean) => {
+      const filename = entryFilenameRef.current;
+      const content = editorRef.current?.getMarkdown() ?? latestMarkdownRef.current;
 
-  const handleSave = useCallback(() => {
-    if (!entry?.filename || !isDirty || saveMutation.isPending) return;
+      if (!filename || !content.trim() || isSavingRef.current) return;
+      if (!isDirtyRef.current && !process) return;
 
-    const content = editorRef.current?.getMarkdown() ?? latestMarkdown;
+      isSavingRef.current = true;
+      setSaveStatus("saving");
 
-    saveMutation.mutate(
-      { content, filename: entry.filename, sha: currentSha },
-      {
-        onSuccess: (result) => {
-          setCurrentSha(result.sha);
-          setIsDirty(false);
-          setLastSavedAt(new Date());
-          setShowToast(true);
-          setTimeout(() => setShowToast(false), 4000);
+      saveMutation.mutate(
+        {
+          content,
+          filename,
+          sha: currentShaRef.current,
+          process,
         },
-      }
-    );
-  }, [entry?.filename, currentSha, isDirty, saveMutation, latestMarkdown]);
+        {
+          onSuccess: (result) => {
+            setCurrentSha(result.sha);
+            currentShaRef.current = result.sha;
+            isDirtyRef.current = false;
+            isSavingRef.current = false;
+            setSaveStatus("saved");
 
-  // Cmd+S / Ctrl+S keyboard shortcut
+            if (process) setHasProcessed(true);
+
+            // Fade status back to idle after 3s
+            if (savedFadeTimerRef.current)
+              clearTimeout(savedFadeTimerRef.current);
+            savedFadeTimerRef.current = setTimeout(
+              () => setSaveStatus("idle"),
+              3000
+            );
+          },
+          onError: () => {
+            isSavingRef.current = false;
+            setSaveStatus("error");
+          },
+        }
+      );
+    },
+    [saveMutation]
+  );
+
+  // ── Schedule autosave on change ─────────────────────────────────────
+  const handleEditorChange = useCallback(
+    (markdown: string) => {
+      latestMarkdownRef.current = markdown;
+      isDirtyRef.current = true;
+      setSaveStatus("idle"); // clear "Saved" while typing
+
+      // Clear existing timers
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      if (processTimerRef.current) clearTimeout(processTimerRef.current);
+
+      // Quick save after 2s idle
+      autosaveTimerRef.current = setTimeout(() => {
+        doSave(false);
+      }, AUTOSAVE_DELAY);
+
+      // Full save (with memory processing) after 30s idle, only once per session
+      if (!hasProcessed) {
+        processTimerRef.current = setTimeout(() => {
+          doSave(true);
+        }, PROCESS_DELAY);
+      }
+    },
+    [doSave, hasProcessed]
+  );
+
+  // ── Cmd+S force-save with processing ────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        handleSave();
+        // Cancel pending autosave, do a full save now
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        if (processTimerRef.current) clearTimeout(processTimerRef.current);
+        doSave(true);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSave]);
+  }, [doSave]);
 
-  const handleSelectEntry = useCallback((date: string) => {
-    setSelectedDate(date === todayStr ? undefined : date);
-    setIsDirty(false);
-    setLastSavedAt(null);
-    setShowEntries(false);
-  }, [todayStr]);
+  // ── Save on page blur / tab switch ──────────────────────────────────
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden" && isDirtyRef.current) {
+        // Cancel pending timers — save immediately
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        if (processTimerRef.current) clearTimeout(processTimerRef.current);
+        doSave(false);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [doSave]);
+
+  // ── Cleanup timers ──────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      if (processTimerRef.current) clearTimeout(processTimerRef.current);
+      if (savedFadeTimerRef.current) clearTimeout(savedFadeTimerRef.current);
+    };
+  }, []);
+
+  // ── Entry selection ─────────────────────────────────────────────────
+  const handleSelectEntry = useCallback(
+    (date: string) => {
+      // Save current entry before switching if dirty
+      if (isDirtyRef.current) {
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        if (processTimerRef.current) clearTimeout(processTimerRef.current);
+        doSave(false);
+      }
+
+      setSelectedDate(date === todayStr ? undefined : date);
+      isDirtyRef.current = false;
+      setSaveStatus("idle");
+      setHasProcessed(false);
+      setShowEntries(false);
+    },
+    [todayStr, doSave]
+  );
 
   // Group entries by month
-  const entriesByMonth = new Map<string, typeof entries>();
+  const entriesByMonth = new Map<
+    string,
+    NonNullable<typeof entriesData>["entries"]
+  >();
   const entries = entriesData?.entries ?? [];
   for (const e of entries) {
     const d = new Date(e.date + "T12:00:00");
-    const key = d.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+    const key = d.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+    });
     const existing = entriesByMonth.get(key) ?? [];
     existing.push(e);
     entriesByMonth.set(key, existing);
@@ -121,7 +236,9 @@ export default function JournalPage() {
       {/* ── Entries Sidebar (desktop: always, mobile: toggle) ──────── */}
       <aside
         className={`${
-          showEntries ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+          showEntries
+            ? "translate-x-0"
+            : "-translate-x-full md:translate-x-0"
         } fixed md:relative z-20 md:z-auto h-full w-[240px] flex-shrink-0 bg-[var(--bg-card)] border-r border-[var(--border-subtle)] transition-transform duration-200 flex flex-col`}
       >
         {/* Sidebar header */}
@@ -140,38 +257,48 @@ export default function JournalPage() {
 
         {/* Entries list */}
         <div className="flex-1 overflow-y-auto py-2">
-          {Array.from(entriesByMonth.entries()).map(([month, monthEntries]) => (
-            <div key={month}>
-              <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
-                {month}
-              </div>
-              {monthEntries!.map((e) => {
-                const isActive =
-                  (selectedDate === e.date) ||
-                  (!selectedDate && e.date === todayStr);
-                const d = new Date(e.date + "T12:00:00");
-                const day = d.getDate();
-                const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
+          {Array.from(entriesByMonth.entries()).map(
+            ([month, monthEntries]) => (
+              <div key={month}>
+                <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                  {month}
+                </div>
+                {monthEntries!.map((e) => {
+                  const isActive =
+                    selectedDate === e.date ||
+                    (!selectedDate && e.date === todayStr);
+                  const d = new Date(e.date + "T12:00:00");
+                  const day = d.getDate();
+                  const weekday = d.toLocaleDateString("en-US", {
+                    weekday: "short",
+                  });
 
-                return (
-                  <button
-                    key={e.date}
-                    onClick={() => handleSelectEntry(e.date)}
-                    className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
-                      isActive
-                        ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    <span className={`text-lg font-light w-7 text-right ${isActive ? "text-[var(--amber)]" : "text-[var(--text-muted)]"}`}>
-                      {day}
-                    </span>
-                    <span className="text-xs">{weekday}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+                  return (
+                    <button
+                      key={e.date}
+                      onClick={() => handleSelectEntry(e.date)}
+                      className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
+                        isActive
+                          ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                      }`}
+                    >
+                      <span
+                        className={`text-lg font-light w-7 text-right ${
+                          isActive
+                            ? "text-[var(--amber)]"
+                            : "text-[var(--text-muted)]"
+                        }`}
+                      >
+                        {day}
+                      </span>
+                      <span className="text-xs">{weekday}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          )}
 
           {entries.length === 0 && (
             <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
@@ -199,38 +326,41 @@ export default function JournalPage() {
               onClick={() => setShowEntries(!showEntries)}
               className="md:hidden text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                />
               </svg>
             </button>
             <p className="text-xs text-[var(--text-muted)] tracking-wide uppercase">
               {dateDisplay}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {/* Save status */}
-            <span className="text-xs text-[var(--text-muted)]">
-              {saveMutation.isPending
-                ? "Saving..."
-                : isDirty
-                ? "Unsaved changes"
-                : lastSavedAt
-                ? `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                : entry?.exists
-                ? ""
-                : isToday
-                ? "New entry"
-                : ""}
-            </span>
-            {/* Save button */}
-            <button
-              onClick={handleSave}
-              disabled={!isDirty || saveMutation.isPending}
-              className="text-xs px-3 py-1.5 rounded-lg bg-[var(--amber)] text-white font-medium disabled:opacity-30 hover:bg-[var(--amber-hover)] transition-colors"
-            >
-              Save
-            </button>
-          </div>
+
+          {/* Save status — subtle, Notion-style */}
+          <span
+            className={`text-xs transition-opacity duration-300 ${
+              saveStatus === "idle"
+                ? "opacity-0"
+                : "opacity-100"
+            } ${
+              saveStatus === "error"
+                ? "text-red-400"
+                : "text-[var(--text-muted)]"
+            }`}
+          >
+            {saveStatus === "saving" && "Saving..."}
+            {saveStatus === "saved" && "Saved"}
+            {saveStatus === "error" && "Save failed — retrying..."}
+          </span>
         </div>
 
         {/* Editor area */}
@@ -245,20 +375,6 @@ export default function JournalPage() {
             />
           </div>
         </div>
-
-        {/* Post-save toast */}
-        {showToast && saveMutation.data && (
-          <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50">
-            <div
-              className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-4 py-2.5 text-xs text-[var(--text-secondary)] shadow-lg"
-              style={{ animation: "slideDown 0.2s ease-out" }}
-            >
-              {saveMutation.data.memory.memoriesCreated > 0
-                ? `Saved — ${saveMutation.data.memory.memoriesCreated} memories created`
-                : "Saved & synced"}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

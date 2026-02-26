@@ -43,8 +43,11 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST — Save a journal entry to GitHub, then trigger sync + memory processing.
- * Body: { content: string, filename: string, sha: string | null }
+ * POST — Save a journal entry to GitHub.
+ * Body: { content: string, filename: string, sha: string | null, process?: boolean }
+ *
+ * When `process` is false (or omitted), does a quick save (just GitHub commit).
+ * When `process` is true, also triggers journal sync + memory processing.
  */
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -53,7 +56,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { content, filename, sha } = await request.json();
+    const { content, filename, sha, process: shouldProcess } = await request.json();
 
     if (!content || !filename) {
       return NextResponse.json(
@@ -65,6 +68,15 @@ export async function POST(request: NextRequest) {
     // 1. Save to GitHub
     const result = await createOrUpdateJournalFile(filename, content, sha);
 
+    // Quick save — just return the new SHA
+    if (!shouldProcess) {
+      return NextResponse.json({
+        sha: result.sha,
+        quickSave: true,
+      });
+    }
+
+    // Full save — also trigger sync + memory processing
     // 2. Trigger journal sync (processes new entries → interactions, insights, etc.)
     const syncResult = await syncJournalEntries(session.user.id);
 

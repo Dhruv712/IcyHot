@@ -196,12 +196,15 @@ export interface JournalSavePayload {
   content: string;
   filename: string;
   sha: string | null;
+  /** When true, also triggers sync + memory processing (slower). Default: false (quick save). */
+  process?: boolean;
 }
 
 export interface JournalSaveResult {
   sha: string;
-  sync: JournalSyncResult;
-  memory: {
+  quickSave?: boolean;
+  sync?: JournalSyncResult;
+  memory?: {
     filesProcessed: number;
     memoriesCreated: number;
     memoriesReinforced: number;
@@ -257,15 +260,21 @@ export function useSaveJournalEntry() {
       }
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["journal-entry"] });
-      queryClient.invalidateQueries({ queryKey: ["journal-status"] });
-      queryClient.invalidateQueries({ queryKey: ["journal-insights"] });
-      queryClient.invalidateQueries({ queryKey: ["journal-open-loops"] });
-      queryClient.invalidateQueries({ queryKey: ["journal-new-people"] });
-      queryClient.invalidateQueries({ queryKey: ["graph"] });
-      queryClient.invalidateQueries({ queryKey: ["contact"] });
-      queryClient.invalidateQueries({ queryKey: ["memory-graph"] });
+    onSuccess: (_data, variables) => {
+      // Always invalidate the entry itself (so reloads get latest SHA)
+      queryClient.invalidateQueries({ queryKey: ["journal-entries"] });
+
+      // Only invalidate heavy queries on full saves (with processing)
+      if (variables.process) {
+        queryClient.invalidateQueries({ queryKey: ["journal-entry"] });
+        queryClient.invalidateQueries({ queryKey: ["journal-status"] });
+        queryClient.invalidateQueries({ queryKey: ["journal-insights"] });
+        queryClient.invalidateQueries({ queryKey: ["journal-open-loops"] });
+        queryClient.invalidateQueries({ queryKey: ["journal-new-people"] });
+        queryClient.invalidateQueries({ queryKey: ["graph"] });
+        queryClient.invalidateQueries({ queryKey: ["contact"] });
+        queryClient.invalidateQueries({ queryKey: ["memory-graph"] });
+      }
     },
   });
 }
