@@ -61,6 +61,16 @@ export default function JournalPage() {
     if (!focusMode) setChromeHidden(false);
   }, [focusMode]);
 
+  // Sync focus state to body so CSS can hide the left nav sidebar too
+  useEffect(() => {
+    if (chromeHidden) {
+      document.body.setAttribute("data-journal-focus", "");
+    } else {
+      document.body.removeAttribute("data-journal-focus");
+    }
+    return () => document.body.removeAttribute("data-journal-focus");
+  }, [chromeHidden]);
+
   // Reset dirty state when entry loads
   useEffect(() => {
     if (entry) {
@@ -291,7 +301,7 @@ export default function JournalPage() {
                 />
               </svg>
             </button>
-            <p className="text-xs text-[var(--text-muted)] tracking-wide uppercase">
+            <p className="text-sm text-[var(--text-muted)] tracking-wide uppercase">
               {dateDisplay}
             </p>
           </div>
