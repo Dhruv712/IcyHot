@@ -79,81 +79,93 @@ export async function GET() {
   }
 
   // 2. Compute fresh clusters
-  const allMemories = await db.execute(sql`
-    SELECT id, content, embedding::text as embedding_text,
-           contact_ids, source, strength
-    FROM memories
-    WHERE user_id = ${userId} AND embedding IS NOT NULL
-    ORDER BY created_at DESC
-  `);
+  try {
+    const allMemories = await db.execute(sql`
+      SELECT id, content, embedding::text as embedding_text,
+             contact_ids, source, strength
+      FROM memories
+      WHERE user_id = ${userId} AND embedding IS NOT NULL
+      ORDER BY created_at DESC
+    `);
 
-  const memoryRows = allMemories.rows as any[];
+    const memoryRows = allMemories.rows as any[];
+    console.log(`[clusters] Found ${memoryRows.length} memories with embeddings`);
 
-  if (memoryRows.length < 4) {
-    return NextResponse.json({ clusters: [], memoryDots: [] });
-  }
-
-  // Parse embeddings
-  const memories: MemoryPoint[] = [];
-  for (const row of memoryRows) {
-    try {
-      const embedding = JSON.parse(row.embedding_text) as number[];
-      if (embedding.length === 1024) {
-        memories.push({
-          id: row.id,
-          embedding,
-          content: row.content,
-          contactIds: row.contact_ids ? JSON.parse(row.contact_ids) : [],
-          source: row.source,
-          strength: row.strength,
-        });
-      }
-    } catch {
-      continue;
+    if (memoryRows.length < 4) {
+      return NextResponse.json({ clusters: [], memoryDots: [] });
     }
-  }
 
-  if (memories.length < 4) {
+    // Parse embeddings
+    const memories: MemoryPoint[] = [];
+    let parseErrors = 0;
+    for (const row of memoryRows) {
+      try {
+        const embedding = JSON.parse(row.embedding_text) as number[];
+        if (embedding.length === 1024) {
+          memories.push({
+            id: row.id,
+            embedding,
+            content: row.content,
+            contactIds: row.contact_ids ? JSON.parse(row.contact_ids) : [],
+            source: row.source,
+            strength: row.strength ?? 1,
+          });
+        }
+      } catch {
+        parseErrors++;
+        continue;
+      }
+    }
+
+    console.log(`[clusters] Parsed ${memories.length} memories (${parseErrors} parse errors)`);
+
+    if (memories.length < 4) {
+      return NextResponse.json({ clusters: [], memoryDots: [] });
+    }
+
+    // K-means
+    const k = Math.min(8, Math.max(3, Math.floor(memories.length / 15)));
+    console.log(`[clusters] Running k-means with k=${k}`);
+    const clusters = kMeansClusters(memories, k);
+    layoutClusters(clusters);
+    console.log(`[clusters] Computed ${clusters.length} clusters:`, clusters.map(c => ({ label: c.label, members: c.memberCount, x: c.x.toFixed(2), y: c.y.toFixed(2) })));
+
+    // 3. Persist clusters to DB (delete old, insert new)
+    await db
+      .delete(memoryClusters)
+      .where(eq(memoryClusters.userId, userId));
+
+    if (clusters.length > 0) {
+      await db.insert(memoryClusters).values(
+        clusters.map((c) => ({
+          userId,
+          centroid: c.centroid,
+          label: c.label,
+          posX: c.x,
+          posY: c.y,
+          memberCount: c.memberCount,
+          computedAt: new Date(),
+        })),
+      );
+    }
+
+    // 4. Project all memories for starfield
+    const memoryDots = memories.map((m) => {
+      const pos = projectToClusters(m.embedding, clusters);
+      return {
+        x: pos.x,
+        y: pos.y,
+        source: m.source,
+        strength: m.strength,
+      };
+    });
+
+    return NextResponse.json({
+      clusters: clusters.map(({ centroid: _, memberIds: __, ...rest }) => rest),
+      memoryDots,
+    });
+  } catch (error) {
+    console.error("[clusters] Error computing clusters:", error);
     return NextResponse.json({ clusters: [], memoryDots: [] });
   }
-
-  // K-means
-  const k = Math.min(8, Math.max(3, Math.floor(memories.length / 15)));
-  const clusters = kMeansClusters(memories, k);
-  layoutClusters(clusters);
-
-  // 3. Persist clusters to DB (delete old, insert new)
-  await db
-    .delete(memoryClusters)
-    .where(eq(memoryClusters.userId, userId));
-
-  if (clusters.length > 0) {
-    await db.insert(memoryClusters).values(
-      clusters.map((c) => ({
-        userId,
-        centroid: c.centroid,
-        label: c.label,
-        posX: c.x,
-        posY: c.y,
-        memberCount: c.memberCount,
-        computedAt: new Date(),
-      })),
-    );
-  }
-
-  // 4. Project all memories for starfield
-  const memoryDots = memories.map((m) => {
-    const pos = projectToClusters(m.embedding, clusters);
-    return {
-      x: pos.x,
-      y: pos.y,
-      source: m.source,
-      strength: m.strength,
-    };
-  });
-
-  return NextResponse.json({
-    clusters: clusters.map(({ centroid: _, memberIds: __, ...rest }) => rest),
-    memoryDots,
-  });
 }
