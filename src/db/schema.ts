@@ -101,7 +101,7 @@ export const journalNudgeTypeEnum = pgEnum("journal_nudge_type", [
   "eyebrow_raise",
 ]);
 
-export const journalNudgeFeedbackEnum = pgEnum("journal_nudge_feedback", [
+export const journalNudgeFeedbackEnum = pgEnum("journal_nudge_feedback_value", [
   "up",
   "down",
 ]);

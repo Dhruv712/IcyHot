@@ -1301,7 +1301,7 @@
         },
         "feedback": {
           "name": "feedback",
-          "type": "journal_nudge_feedback",
+          "type": "journal_nudge_feedback_value",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
@@ -2524,8 +2524,8 @@
     }
   },
   "enums": {
-    "public.journal_nudge_feedback": {
-      "name": "journal_nudge_feedback",
+    "public.journal_nudge_feedback_value": {
+      "name": "journal_nudge_feedback_value",
       "schema": "public",
       "values": [
         "up",

@@ -1,11 +1,11 @@
-CREATE TYPE "public"."journal_nudge_feedback" AS ENUM('up', 'down');--> statement-breakpoint
+CREATE TYPE "public"."journal_nudge_feedback_value" AS ENUM('up', 'down');--> statement-breakpoint
 CREATE TYPE "public"."journal_nudge_reason" AS ENUM('too_vague', 'wrong_connection', 'already_obvious', 'bad_tone', 'not_now');--> statement-breakpoint
 CREATE TYPE "public"."journal_nudge_type" AS ENUM('tension', 'callback', 'eyebrow_raise');--> statement-breakpoint
 CREATE TABLE "journal_nudge_feedback" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"nudge_id" uuid NOT NULL,
 	"user_id" uuid NOT NULL,
-	"feedback" "journal_nudge_feedback" NOT NULL,
+	"feedback" "journal_nudge_feedback_value" NOT NULL,
 	"reason" "journal_nudge_reason",
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
