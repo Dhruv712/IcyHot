@@ -354,74 +354,103 @@ async function loadHistory(userId: string, entryDate: string): Promise<{
   recent: HistoricalNudge[];
   todayDistribution: Record<SparkNudgeType, number>;
   sessionDistribution: Record<SparkNudgeType, number>;
+  storageAvailable: boolean;
 }> {
-  const rows = await db
-    .select({
-      type: journalNudges.type,
-      evidenceMemoryId: journalNudges.evidenceMemoryId,
-      hook: journalNudges.hook,
-      entryDate: journalNudges.entryDate,
-    })
-    .from(journalNudges)
-    .where(eq(journalNudges.userId, userId))
-    .orderBy(desc(journalNudges.createdAt))
-    .limit(40);
+  try {
+    const rows = await db
+      .select({
+        type: journalNudges.type,
+        evidenceMemoryId: journalNudges.evidenceMemoryId,
+        hook: journalNudges.hook,
+        entryDate: journalNudges.entryDate,
+      })
+      .from(journalNudges)
+      .where(eq(journalNudges.userId, userId))
+      .orderBy(desc(journalNudges.createdAt))
+      .limit(40);
 
-  const recent = rows.slice(0, 20).map((row) => ({
-    type: row.type,
-    evidenceMemoryId: row.evidenceMemoryId,
-    hook: row.hook,
-  }));
+    const recent = rows.slice(0, 20).map((row) => ({
+      type: row.type,
+      evidenceMemoryId: row.evidenceMemoryId,
+      hook: row.hook,
+    }));
 
-  const todayRows = rows.filter((row) => {
-    const rowDate =
-      typeof row.entryDate === "string"
-        ? row.entryDate
-        : new Date(row.entryDate).toISOString().slice(0, 10);
-    return rowDate === entryDate;
-  });
-  const sessionRows = rows.slice(0, 12);
+    const todayRows = rows.filter((row) => {
+      const rowDate =
+        typeof row.entryDate === "string"
+          ? row.entryDate
+          : new Date(row.entryDate).toISOString().slice(0, 10);
+      return rowDate === entryDate;
+    });
+    const sessionRows = rows.slice(0, 12);
 
-  return {
-    recent,
-    todayDistribution: buildSessionTypeDistribution(todayRows),
-    sessionDistribution: buildSessionTypeDistribution(sessionRows),
-  };
+    return {
+      recent,
+      todayDistribution: buildSessionTypeDistribution(todayRows),
+      sessionDistribution: buildSessionTypeDistribution(sessionRows),
+      storageAvailable: true,
+    };
+  } catch (error) {
+    console.warn("[margin] History unavailable, using stateless mode:", error);
+    return {
+      recent: [],
+      todayDistribution: { tension: 0, callback: 0, eyebrow_raise: 0 },
+      sessionDistribution: { tension: 0, callback: 0, eyebrow_raise: 0 },
+      storageAvailable: false,
+    };
+  }
 }
 
-async function loadPersonalization(userId: string): Promise<PersonalizationContext> {
-  const feedbackRows = await db
-    .select({
-      type: journalNudges.type,
-      feedback: journalNudgeFeedback.feedback,
-      reason: journalNudgeFeedback.reason,
-    })
-    .from(journalNudgeFeedback)
-    .innerJoin(journalNudges, eq(journalNudgeFeedback.nudgeId, journalNudges.id))
-    .where(eq(journalNudgeFeedback.userId, userId))
-    .orderBy(desc(journalNudgeFeedback.createdAt))
-    .limit(200);
-
+function defaultPersonalizationContext(): PersonalizationContext {
   const typeWeights: Record<SparkNudgeType, number> = {
     tension: 2.7,
     callback: 2.5,
     eyebrow_raise: 2.3,
   };
+  return { typeWeights, reasonPenalties: {} };
+}
 
-  const reasonPenalties: Record<string, number> = {};
+async function loadPersonalization(userId: string): Promise<{
+  context: PersonalizationContext;
+  storageAvailable: boolean;
+}> {
+  try {
+    const feedbackRows = await db
+      .select({
+        type: journalNudges.type,
+        feedback: journalNudgeFeedback.feedback,
+        reason: journalNudgeFeedback.reason,
+      })
+      .from(journalNudgeFeedback)
+      .innerJoin(journalNudges, eq(journalNudgeFeedback.nudgeId, journalNudges.id))
+      .where(eq(journalNudgeFeedback.userId, userId))
+      .orderBy(desc(journalNudgeFeedback.createdAt))
+      .limit(200);
 
-  for (const row of feedbackRows) {
-    const delta = row.feedback === "up" ? 0.06 : -0.09;
-    typeWeights[row.type] = Math.max(0, Math.min(5, typeWeights[row.type] + delta));
-    if (row.feedback === "down" && row.reason) {
-      reasonPenalties[row.reason] = Math.min(
-        2,
-        (reasonPenalties[row.reason] ?? 0) + 0.08,
+    const context = defaultPersonalizationContext();
+
+    for (const row of feedbackRows) {
+      const delta = row.feedback === "up" ? 0.06 : -0.09;
+      context.typeWeights[row.type] = Math.max(
+        0,
+        Math.min(5, context.typeWeights[row.type] + delta),
       );
+      if (row.feedback === "down" && row.reason) {
+        context.reasonPenalties[row.reason] = Math.min(
+          2,
+          (context.reasonPenalties[row.reason] ?? 0) + 0.08,
+        );
+      }
     }
-  }
 
-  return { typeWeights, reasonPenalties };
+    return { context, storageAvailable: true };
+  } catch (error) {
+    console.warn("[margin] Personalization unavailable, using defaults:", error);
+    return {
+      context: defaultPersonalizationContext(),
+      storageAvailable: false,
+    };
+  }
 }
 
 function mapToCompatibilityAnnotation(
@@ -543,6 +572,7 @@ export async function POST(request: NextRequest) {
   let judgedCount = 0;
   let failureMode: LlmFailureMode = "model_empty";
   let rejectionCounts: Record<string, number> = {};
+  let storageWarning: string | null = null;
 
   try {
     const retrieveStart = Date.now();
@@ -578,10 +608,8 @@ export async function POST(request: NextRequest) {
       })),
     };
 
-    const { recent, todayDistribution, sessionDistribution } = await loadHistory(
-      session.user.id,
-      resolvedEntryDate,
-    );
+    const historyResult = await loadHistory(session.user.id, resolvedEntryDate);
+    const { recent, todayDistribution, sessionDistribution } = historyResult;
 
     const baseTrace: MarginTrace = {
       reason: "No nudge this pass.",
@@ -707,7 +735,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const personalization = await loadPersonalization(session.user.id);
+    const personalizationResult = await loadPersonalization(session.user.id);
+    const personalization = personalizationResult.context;
+    const storageAvailable =
+      historyResult.storageAvailable && personalizationResult.storageAvailable;
+    if (!storageAvailable) {
+      storageWarning =
+        "Spark metadata storage unavailable; running stateless mode (no personalization memory yet).";
+    }
 
     const judgeStart = Date.now();
     const judgeResponse = await client.messages.create({
@@ -808,47 +843,61 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const insertedNudges = await Promise.all(
+    const materializedNudges = await Promise.all(
       topAccepted.map(async (candidate) => {
-        const inserted = await db
-          .insert(journalNudges)
-          .values({
-            id: randomUUID(),
-            userId: session.user.id,
-            entryDate: resolvedEntryDate,
-            paragraphHash,
-            paragraphIndex: paragraphIndex ?? 0,
-            type: candidate.type,
-            hook: candidate.hook,
-            evidenceMemoryId: candidate.evidenceMemoryId || null,
-            evidenceMemoryDate: candidate.evidenceMemoryDate || null,
-            retrievalTopScore: Number(topScore.toFixed(5)),
-            retrievalSecondScore: Number(secondScore.toFixed(5)),
-            utilityScore: Number(candidate.overallUtility.toFixed(4)),
-            modelConfidence: Number(candidate.modelConfidence.toFixed(4)),
-          })
-          .onConflictDoUpdate({
-            target: [
-              journalNudges.userId,
-              journalNudges.entryDate,
-              journalNudges.paragraphHash,
-              journalNudges.type,
-            ],
-            set: {
-              paragraphIndex: paragraphIndex ?? 0,
-              hook: candidate.hook,
-              evidenceMemoryId: candidate.evidenceMemoryId || null,
-              evidenceMemoryDate: candidate.evidenceMemoryDate || null,
-              retrievalTopScore: Number(topScore.toFixed(5)),
-              retrievalSecondScore: Number(secondScore.toFixed(5)),
-              utilityScore: Number(candidate.overallUtility.toFixed(4)),
-              modelConfidence: Number(candidate.modelConfidence.toFixed(4)),
-              createdAt: new Date(),
-            },
-          })
-          .returning({ id: journalNudges.id });
+        let id: string = randomUUID();
+        let persisted = false;
 
-        const id = inserted[0]?.id ?? randomUUID();
+        if (storageAvailable) {
+          try {
+            const inserted = await db
+              .insert(journalNudges)
+              .values({
+                id,
+                userId: session.user.id,
+                entryDate: resolvedEntryDate,
+                paragraphHash,
+                paragraphIndex: paragraphIndex ?? 0,
+                type: candidate.type,
+                hook: candidate.hook,
+                evidenceMemoryId: candidate.evidenceMemoryId || null,
+                evidenceMemoryDate: candidate.evidenceMemoryDate || null,
+                retrievalTopScore: Number(topScore.toFixed(5)),
+                retrievalSecondScore: Number(secondScore.toFixed(5)),
+                utilityScore: Number(candidate.overallUtility.toFixed(4)),
+                modelConfidence: Number(candidate.modelConfidence.toFixed(4)),
+              })
+              .onConflictDoUpdate({
+                target: [
+                  journalNudges.userId,
+                  journalNudges.entryDate,
+                  journalNudges.paragraphHash,
+                  journalNudges.type,
+                ],
+                set: {
+                  paragraphIndex: paragraphIndex ?? 0,
+                  hook: candidate.hook,
+                  evidenceMemoryId: candidate.evidenceMemoryId || null,
+                  evidenceMemoryDate: candidate.evidenceMemoryDate || null,
+                  retrievalTopScore: Number(topScore.toFixed(5)),
+                  retrievalSecondScore: Number(secondScore.toFixed(5)),
+                  utilityScore: Number(candidate.overallUtility.toFixed(4)),
+                  modelConfidence: Number(candidate.modelConfidence.toFixed(4)),
+                  createdAt: new Date(),
+                },
+              })
+              .returning({ id: journalNudges.id });
+
+            if (inserted[0]?.id) {
+              id = inserted[0].id;
+              persisted = true;
+            }
+          } catch (error) {
+            storageWarning =
+              "Spark metadata storage unavailable; running stateless mode (nudge persistence failed).";
+            console.warn("[margin] Failed to persist nudge metadata:", error);
+          }
+        }
 
         const nudge: SparkNudge = {
           id,
@@ -871,9 +920,12 @@ export async function POST(request: NextRequest) {
           },
         };
 
-        return nudge;
+        return { nudge, persisted };
       }),
     );
+
+    const insertedNudges = materializedNudges.map((item) => item.nudge);
+    const persistedNudges = materializedNudges.filter((item) => item.persisted).length;
 
     const newSessionDistribution = {
       ...baseTrace.funnel!.sessionTypeDistribution,
@@ -907,6 +959,12 @@ export async function POST(request: NextRequest) {
       },
     };
 
+    if (storageWarning) {
+      trace.reason = `${trace.reason} ${storageWarning}`;
+    } else if (persistedNudges < insertedNudges.length) {
+      trace.reason = `${trace.reason} Some nudges were not persisted.`;
+    }
+
     const compatibility = insertedNudges.map(mapToCompatibilityAnnotation);
     const visibleNudges =
       sparkMode.sparkEnabled && !sparkMode.shadowMode ? insertedNudges : [];
@@ -922,8 +980,11 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[margin] Error:", error);
+    const storageError = isSparkStorageError(error);
     const trace: MarginTrace = {
-      reason: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+      reason: storageError
+        ? "Spark metadata tables are not ready yet. Run the latest migration and retry."
+        : `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
       llm: {
         rawCandidates,
         judgedCandidates: judgedCount,
@@ -996,4 +1057,15 @@ function resolveSparkMode(userId: string): {
   const shadowMode = shadowUsers.has(userId);
 
   return { sparkEnabled, shadowMode };
+}
+
+function isSparkStorageError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("journal_nudges") ||
+    message.includes("journal_nudge_feedback") ||
+    (message.includes("relation") && message.includes("does not exist")) ||
+    message.includes("undefined table")
+  );
 }
