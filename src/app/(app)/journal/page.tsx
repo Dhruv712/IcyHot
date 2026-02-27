@@ -12,6 +12,7 @@ import dynamic from "next/dynamic";
 import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
 import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
+import SparkCards from "@/components/journal/SparkCards";
 import MarginLabPanel from "@/components/journal/MarginLabPanel";
 import { useGravityWell } from "@/hooks/useGravityWell";
 import GravityWellMap from "@/components/journal/GravityWellMap";
@@ -62,9 +63,14 @@ export default function JournalPage() {
   const saveMutation = useSaveJournalEntry();
   const {
     annotations: marginAnnotations,
+    nudges: sparkNudges,
     handleParagraphChange: handleMarginParagraph,
     dismissAnnotation,
+    dismissNudge,
+    expandNudge,
+    submitNudgeFeedback,
     inspector: marginInspector,
+    sparkSummary,
   } = useMarginIntelligence({
     entryDate,
     enabled: !isLoading,
@@ -138,6 +144,9 @@ export default function JournalPage() {
               minTopGap: 0.03,
               strongTopOverride: 0.22,
               minModelConfidence: 0.8,
+              minOverallUtility: 4.2,
+              minSpecificityScore: 4.0,
+              minActionabilityScore: 3.9,
             },
             promptAddendum,
             promptOverride,
@@ -166,6 +175,9 @@ export default function JournalPage() {
               minTopGap: 0.008,
               strongTopOverride: 0.14,
               minModelConfidence: 0.64,
+              minOverallUtility: 3.6,
+              minSpecificityScore: 3.0,
+              minActionabilityScore: 3.0,
               maxMemoriesContext: 6,
               maxImplicationsContext: 3,
             },
@@ -548,11 +560,21 @@ export default function JournalPage() {
               onActiveParagraph={handleActiveParagraph}
               placeholder="Start writing..."
             />
-            <MarginAnnotations
-              annotations={marginAnnotations}
-              editorElement={editorElement}
-              onDismiss={dismissAnnotation}
-            />
+            {sparkNudges.length > 0 ? (
+              <SparkCards
+                nudges={sparkNudges}
+                editorElement={editorElement}
+                onDismiss={dismissNudge}
+                onExpand={expandNudge}
+                onFeedback={submitNudgeFeedback}
+              />
+            ) : (
+              <MarginAnnotations
+                annotations={marginAnnotations}
+                editorElement={editorElement}
+                onDismiss={dismissAnnotation}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -714,6 +736,7 @@ export default function JournalPage() {
                 onApplyPreset={applyMarginPreset}
                 onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
                 inspector={marginInspector}
+                sparkSummary={sparkSummary}
               />
             )}
           </div>

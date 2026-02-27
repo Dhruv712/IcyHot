@@ -1,7 +1,10 @@
 "use client";
 
 import type { MarginTuningSettings } from "@/lib/marginTuning";
-import type { MarginInspectorState } from "@/hooks/useMarginIntelligence";
+import type {
+  MarginInspectorState,
+  SparkSummary,
+} from "@/hooks/useMarginIntelligence";
 
 interface MarginLabPanelProps {
   value: MarginTuningSettings;
@@ -9,6 +12,7 @@ interface MarginLabPanelProps {
   onReset: () => void;
   onApplyPreset: (preset: "subtle" | "balanced" | "generous") => void;
   inspector: MarginInspectorState;
+  sparkSummary: SparkSummary;
 }
 
 function NumberField({
@@ -48,6 +52,7 @@ export default function MarginLabPanel({
   onReset,
   onApplyPreset,
   inspector,
+  sparkSummary,
 }: MarginLabPanelProps) {
   const setClient = <K extends keyof MarginTuningSettings["client"]>(
     key: K,
@@ -122,15 +127,62 @@ export default function MarginLabPanel({
             {inspector.trace.llm && (
               <div className="text-[var(--text-muted)]">
                 LLM: accepted {inspector.trace.llm.accepted}/
-                {inspector.trace.llm.rawCandidates} · mode {inspector.trace.llm.failureMode} · min conf {inspector.trace.llm.minModelConfidence}
+                {inspector.trace.llm.judgedCandidates}/
+                {inspector.trace.llm.rawCandidates} (accepted/judged/generated) · mode{" "}
+                {inspector.trace.llm.failureMode} · min conf{" "}
+                {inspector.trace.llm.minModelConfidence}
+              </div>
+            )}
+            {inspector.trace.funnel && (
+              <div className="space-y-0.5 text-[var(--text-muted)]">
+                <div>
+                  Funnel: {inspector.trace.funnel.generated} generated →{" "}
+                  {inspector.trace.funnel.judged} judged →{" "}
+                  {inspector.trace.funnel.accepted} accepted
+                </div>
+                <div>
+                  Rejects:{" "}
+                  {Object.entries(inspector.trace.funnel.rejectionCounts).length > 0
+                    ? Object.entries(inspector.trace.funnel.rejectionCounts)
+                        .map(([reason, count]) => `${reason}:${count}`)
+                        .join(" · ")
+                    : "none"}
+                </div>
+                <div>
+                  Type mix (session): T {inspector.trace.funnel.sessionTypeDistribution.tension} · C{" "}
+                  {inspector.trace.funnel.sessionTypeDistribution.callback} · E{" "}
+                  {inspector.trace.funnel.sessionTypeDistribution.eyebrow_raise}
+                </div>
+                <div>
+                  Type mix (today): T {inspector.trace.funnel.todayTypeDistribution.tension} · C{" "}
+                  {inspector.trace.funnel.todayTypeDistribution.callback} · E{" "}
+                  {inspector.trace.funnel.todayTypeDistribution.eyebrow_raise}
+                </div>
               </div>
             )}
             <div className="text-[var(--text-muted)]">
               Timing: retrieve {inspector.trace.timingsMs.retrieve}ms · llm{" "}
-              {inspector.trace.timingsMs.llm}ms · total {inspector.trace.timingsMs.total}ms
+              {inspector.trace.timingsMs.generate + inspector.trace.timingsMs.judge}ms
+              {" "}({inspector.trace.timingsMs.generate} + {inspector.trace.timingsMs.judge})
+              {" "}· total {inspector.trace.timingsMs.total}ms
             </div>
           </div>
         )}
+      </div>
+
+      <div className="space-y-1 border border-[var(--border-subtle)] rounded-xl p-3 bg-[var(--bg-elevated)]">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+          Spark Summary
+        </div>
+        <div className="text-[11px] text-[var(--text-muted)]">
+          Visible: {sparkSummary.totalVisible}
+        </div>
+        <div className="text-[11px] text-[var(--text-muted)]">
+          Types: tension {sparkSummary.byType.tension} · callback {sparkSummary.byType.callback} · eyebrow {sparkSummary.byType.eyebrow_raise}
+        </div>
+        <div className="text-[11px] text-[var(--text-muted)]">
+          Feedback: useful {sparkSummary.feedback.up} · not useful {sparkSummary.feedback.down}
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -257,6 +309,30 @@ export default function MarginLabPanel({
           max={1}
           step={0.01}
           onChange={(n) => setServer("minModelConfidence", n)}
+        />
+        <NumberField
+          label="Min utility"
+          value={value.server.minOverallUtility}
+          min={0}
+          max={5}
+          step={0.1}
+          onChange={(n) => setServer("minOverallUtility", n)}
+        />
+        <NumberField
+          label="Min specificity"
+          value={value.server.minSpecificityScore}
+          min={0}
+          max={5}
+          step={0.1}
+          onChange={(n) => setServer("minSpecificityScore", n)}
+        />
+        <NumberField
+          label="Min actionability"
+          value={value.server.minActionabilityScore}
+          min={0}
+          max={5}
+          step={0.1}
+          onChange={(n) => setServer("minActionabilityScore", n)}
         />
         <NumberField
           label="Server min words"

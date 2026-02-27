@@ -10,6 +10,7 @@ import {
   pgEnum,
   unique,
   uniqueIndex,
+  index,
   vector,
 } from "drizzle-orm/pg-core";
 
@@ -92,6 +93,25 @@ export const sentimentEnum = pgEnum("sentiment", [
   "good",
   "neutral",
   "awkward",
+]);
+
+export const journalNudgeTypeEnum = pgEnum("journal_nudge_type", [
+  "tension",
+  "callback",
+  "eyebrow_raise",
+]);
+
+export const journalNudgeFeedbackEnum = pgEnum("journal_nudge_feedback", [
+  "up",
+  "down",
+]);
+
+export const journalNudgeReasonEnum = pgEnum("journal_nudge_reason", [
+  "too_vague",
+  "wrong_connection",
+  "already_obvious",
+  "bad_tone",
+  "not_now",
 ]);
 
 export const interactions = pgTable("interactions", {
@@ -353,6 +373,56 @@ export const memories = pgTable(
     lastActivatedAt: timestamp("last_activated_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
+);
+
+export const journalNudges = pgTable(
+  "journal_nudges",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    entryDate: date("entry_date").notNull(),
+    paragraphHash: text("paragraph_hash").notNull(),
+    paragraphIndex: integer("paragraph_index").notNull(),
+    type: journalNudgeTypeEnum("type").notNull(),
+    hook: text("hook").notNull(),
+    evidenceMemoryId: uuid("evidence_memory_id").references(() => memories.id, {
+      onDelete: "set null",
+    }),
+    evidenceMemoryDate: date("evidence_memory_date"),
+    retrievalTopScore: real("retrieval_top_score").notNull(),
+    retrievalSecondScore: real("retrieval_second_score").notNull(),
+    utilityScore: real("utility_score").notNull(),
+    modelConfidence: real("model_confidence").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("journal_nudges_user_para_hash_idx").on(
+      table.userId,
+      table.entryDate,
+      table.paragraphHash,
+      table.type
+    ),
+    index("journal_nudges_user_created_idx").on(table.userId, table.createdAt),
+  ]
+);
+
+export const journalNudgeFeedback = pgTable(
+  "journal_nudge_feedback",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    nudgeId: uuid("nudge_id")
+      .references(() => journalNudges.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    feedback: journalNudgeFeedbackEnum("feedback").notNull(),
+    reason: journalNudgeReasonEnum("reason"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("journal_nudge_feedback_nudge_user").on(table.nudgeId, table.userId)]
 );
 
 export const memoryConnections = pgTable(

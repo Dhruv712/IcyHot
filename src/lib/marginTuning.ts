@@ -15,6 +15,9 @@ export interface MarginServerTuning {
   minTopGap: number;
   strongTopOverride: number;
   minModelConfidence: number;
+  minOverallUtility: number;
+  minSpecificityScore: number;
+  minActionabilityScore: number;
   maxMemoriesContext: number;
   maxImplicationsContext: number;
 }
@@ -45,6 +48,9 @@ export const DEFAULT_MARGIN_SERVER_TUNING: MarginServerTuning = {
   minTopGap: 0.015,
   strongTopOverride: 0.17,
   minModelConfidence: 0.72,
+  minOverallUtility: 4.0,
+  minSpecificityScore: 3.5,
+  minActionabilityScore: 3.5,
   maxMemoriesContext: 4,
   maxImplicationsContext: 2,
 };
@@ -162,6 +168,24 @@ export function coerceMarginTuning(input: unknown): MarginTuningSettings {
         DEFAULT_MARGIN_SERVER_TUNING.minModelConfidence,
         0.01,
         1,
+      ),
+      minOverallUtility: clampNumber(
+        server.minOverallUtility,
+        DEFAULT_MARGIN_SERVER_TUNING.minOverallUtility,
+        0,
+        5,
+      ),
+      minSpecificityScore: clampNumber(
+        server.minSpecificityScore,
+        DEFAULT_MARGIN_SERVER_TUNING.minSpecificityScore,
+        0,
+        5,
+      ),
+      minActionabilityScore: clampNumber(
+        server.minActionabilityScore,
+        DEFAULT_MARGIN_SERVER_TUNING.minActionabilityScore,
+        0,
+        5,
       ),
       maxMemoriesContext: clampNumber(
         server.maxMemoriesContext,

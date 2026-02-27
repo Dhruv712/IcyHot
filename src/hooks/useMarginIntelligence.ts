@@ -6,6 +6,12 @@ import {
   DEFAULT_MARGIN_TUNING,
   type MarginTuningSettings,
 } from "@/lib/marginTuning";
+import {
+  type MarginDownReason,
+  type MarginTrace,
+  type SparkNudge,
+  type SparkNudgeType,
+} from "@/lib/marginSpark";
 
 export interface MarginAnnotation {
   id: string;
@@ -16,45 +22,21 @@ export interface MarginAnnotation {
   memorySnippet?: string;
 }
 
+export interface SparkNudgeCard extends SparkNudge {
+  createdAtMs: number;
+  collapsed: boolean;
+  feedback?: {
+    value: "up" | "down";
+    reason?: MarginDownReason;
+  };
+  feedbackPending?: boolean;
+}
+
 interface MarginResponse {
+  nudges?: SparkNudge[];
   annotations: MarginAnnotation[];
   paragraphHash: string;
   trace?: MarginTrace;
-}
-
-export interface MarginTrace {
-  reason: string;
-  retrieval?: {
-    totalMemories: number;
-    strongMemories: number;
-    topScore: number;
-    secondScore: number;
-    hasClearSignal: boolean;
-    implications: number;
-    topSamples: Array<{
-      score: number;
-      hop: number;
-      snippet: string;
-    }>;
-  };
-  llm?: {
-    rawCandidates: number;
-    accepted: number;
-    failureMode:
-      | "accepted"
-      | "model_empty"
-      | "no_json"
-      | "json_parse_error"
-      | "filtered_text"
-      | "filtered_type"
-      | "filtered_confidence";
-    minModelConfidence: number;
-  };
-  timingsMs: {
-    retrieve: number;
-    llm: number;
-    total: number;
-  };
 }
 
 export interface MarginInspectorState {
@@ -64,6 +46,15 @@ export interface MarginInspectorState {
   paragraphPreview?: string;
   trace?: MarginTrace;
   updatedAt: number;
+}
+
+export interface SparkSummary {
+  totalVisible: number;
+  byType: Record<SparkNudgeType, number>;
+  feedback: {
+    up: number;
+    down: number;
+  };
 }
 
 function simpleHash(text: string): string {
@@ -83,6 +74,24 @@ function annotationSignature(annotation: MarginAnnotation): string {
   ].join("|");
 }
 
+function nudgeSignature(nudge: SparkNudge): string {
+  return [
+    nudge.type,
+    nudge.hook.trim().toLowerCase(),
+    nudge.evidenceMemoryDate ?? "",
+    nudge.evidenceMemorySnippet?.trim().toLowerCase() ?? "",
+  ].join("|");
+}
+
+function collapseStack(cards: SparkNudgeCard[]): SparkNudgeCard[] {
+  if (cards.length === 0) return cards;
+  const sorted = [...cards].sort((a, b) => a.createdAtMs - b.createdAtMs);
+  return sorted.map((card, idx) => ({
+    ...card,
+    collapsed: idx < sorted.length - 1,
+  }));
+}
+
 export function useMarginIntelligence({
   entryDate,
   enabled,
@@ -97,15 +106,24 @@ export function useMarginIntelligence({
     [tuning],
   );
   const tuningKey = useMemo(() => JSON.stringify(resolvedTuning), [resolvedTuning]);
+  const sessionIdRef = useRef(
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `session-${Date.now()}`,
+  );
 
   const [annotations, setAnnotations] = useState<MarginAnnotation[]>([]);
+  const [nudges, setNudges] = useState<SparkNudgeCard[]>([]);
   const [inspector, setInspector] = useState<MarginInspectorState>({
     phase: "idle",
     message: "Idle",
     updatedAt: 0,
   });
-  const dismissedRef = useRef(new Set<string>());
-  const shownRef = useRef(new Set<string>());
+
+  const dismissedAnnotationsRef = useRef(new Set<string>());
+  const shownAnnotationsRef = useRef(new Set<string>());
+  const dismissedNudgesRef = useRef(new Set<string>());
+  const shownNudgesRef = useRef(new Set<string>());
   const queriedHashesRef = useRef(new Set<string>());
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,17 +132,41 @@ export function useMarginIntelligence({
   const annotationCountRef = useRef(0);
   const lastAnnotatedParagraphRef = useRef(-Infinity);
 
-  // Clear all state on entry switch
+  const sparkSummary = useMemo<SparkSummary>(() => {
+    const byType: Record<SparkNudgeType, number> = {
+      tension: 0,
+      callback: 0,
+      eyebrow_raise: 0,
+    };
+
+    let up = 0;
+    let down = 0;
+
+    for (const nudge of nudges) {
+      byType[nudge.type] += 1;
+      if (nudge.feedback?.value === "up") up += 1;
+      if (nudge.feedback?.value === "down") down += 1;
+    }
+
+    return {
+      totalVisible: nudges.length,
+      byType,
+      feedback: { up, down },
+    };
+  }, [nudges]);
+
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset when switching journal entries
     setAnnotations([]);
+    setNudges([]);
     setInspector({
       phase: "idle",
       message: "Idle",
       updatedAt: Date.now(),
     });
-    dismissedRef.current.clear();
-    shownRef.current.clear();
+    dismissedAnnotationsRef.current.clear();
+    shownAnnotationsRef.current.clear();
+    dismissedNudgesRef.current.clear();
+    shownNudgesRef.current.clear();
     queriedHashesRef.current.clear();
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
@@ -134,11 +176,9 @@ export function useMarginIntelligence({
     lastAnnotatedParagraphRef.current = -Infinity;
   }, [entryDate]);
 
-  // Allow re-querying the same paragraph after tuning changes.
   useEffect(() => {
     queriedHashesRef.current.clear();
     lastQueryAtRef.current = 0;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional refresh after tuning changes
     setInspector({
       phase: "idle",
       message: "Settings updated. Ready for next paragraph.",
@@ -146,16 +186,83 @@ export function useMarginIntelligence({
     });
   }, [tuningKey]);
 
+  const submitNudgeFeedback = useCallback(
+    async (
+      nudgeId: string,
+      feedback: "up" | "down",
+      reason?: MarginDownReason,
+    ) => {
+      setNudges((prev) =>
+        prev.map((nudge) =>
+          nudge.id === nudgeId
+            ? {
+                ...nudge,
+                feedback: {
+                  value: feedback,
+                  reason: feedback === "down" ? reason : undefined,
+                },
+                feedbackPending: true,
+              }
+            : nudge,
+        ),
+      );
+
+      try {
+        const res = await fetch("/api/journal/margin/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nudgeId, feedback, reason }),
+        });
+
+        if (!res.ok) throw new Error(`Feedback request failed (${res.status})`);
+
+        setNudges((prev) =>
+          prev.map((nudge) =>
+            nudge.id === nudgeId ? { ...nudge, feedbackPending: false } : nudge,
+          ),
+        );
+      } catch (error) {
+        console.error("[margin] Feedback submission failed:", error);
+        setNudges((prev) =>
+          prev.map((nudge) =>
+            nudge.id === nudgeId
+              ? {
+                  ...nudge,
+                  feedbackPending: false,
+                  feedback: undefined,
+                }
+              : nudge,
+          ),
+        );
+      }
+    },
+    [],
+  );
+
+  const dismissNudge = useCallback((id: string) => {
+    setNudges((prev) => {
+      const target = prev.find((n) => n.id === id);
+      if (target) dismissedNudgesRef.current.add(nudgeSignature(target));
+      return collapseStack(prev.filter((n) => n.id !== id));
+    });
+  }, []);
+
+  const expandNudge = useCallback((id: string) => {
+    setNudges((prev) =>
+      prev.map((nudge) => ({
+        ...nudge,
+        collapsed: nudge.id === id ? false : nudge.collapsed,
+      })),
+    );
+  }, []);
+
   const triggerQuery = useCallback(
     async (
       paragraphText: string,
       fullEntry: string,
       paragraphIndex: number,
     ) => {
-      if (
-        annotationCountRef.current >=
-        resolvedTuning.client.maxAnnotationsPerEntry
-      ) {
+      if (annotationCountRef.current >= resolvedTuning.client.maxAnnotationsPerEntry) {
         setInspector({
           phase: "done",
           message: `Skipped: entry annotation cap (${resolvedTuning.client.maxAnnotationsPerEntry}) reached.`,
@@ -165,6 +272,7 @@ export function useMarginIntelligence({
         });
         return;
       }
+
       if (
         Math.abs(paragraphIndex - lastAnnotatedParagraphRef.current) <=
         resolvedTuning.client.minParagraphGap
@@ -178,6 +286,7 @@ export function useMarginIntelligence({
         });
         return;
       }
+
       if (
         Date.now() - lastAnnotatedAtRef.current <
         resolvedTuning.client.annotationCooldownMs
@@ -191,10 +300,8 @@ export function useMarginIntelligence({
         });
         return;
       }
-      if (
-        Date.now() - lastQueryAtRef.current <
-        resolvedTuning.client.minQueryGapMs
-      ) {
+
+      if (Date.now() - lastQueryAtRef.current < resolvedTuning.client.minQueryGapMs) {
         setInspector({
           phase: "done",
           message: `Skipped: query gap active (${resolvedTuning.client.minQueryGapMs}ms).`,
@@ -207,17 +314,18 @@ export function useMarginIntelligence({
 
       const hash = simpleHash(paragraphText.trim());
       if (queriedHashesRef.current.has(hash)) return;
+
       queriedHashesRef.current.add(hash);
       lastQueryAtRef.current = Date.now();
+
       setInspector({
         phase: "querying",
-        message: "Scanning memories and patterns...",
+        message: "Scanning memories, generating candidates, and judging utility...",
         paragraphIndex,
         paragraphPreview: paragraphText.slice(0, 120),
         updatedAt: Date.now(),
       });
 
-      // Cancel any in-flight request
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -232,6 +340,7 @@ export function useMarginIntelligence({
             entryDate,
             paragraphIndex,
             tuning: resolvedTuning,
+            clientSessionId: sessionIdRef.current,
           }),
           signal: controller.signal,
         });
@@ -239,25 +348,57 @@ export function useMarginIntelligence({
         if (!res.ok) return;
         const data: MarginResponse = await res.json();
 
+        const incomingNudges = (data.nudges ?? []).filter((nudge) => {
+          const sig = nudgeSignature(nudge);
+          if (dismissedNudgesRef.current.has(sig)) return false;
+          if (shownNudgesRef.current.has(sig)) return false;
+          return true;
+        });
+
+        setNudges((prev) => {
+          if (incomingNudges.length === 0) return prev;
+
+          const filtered = prev.filter((n) => n.paragraphIndex !== paragraphIndex);
+          const enriched = incomingNudges.map((nudge) => ({
+            ...nudge,
+            createdAtMs: Date.now(),
+            collapsed: false,
+          }));
+
+          for (const nudge of incomingNudges) {
+            shownNudgesRef.current.add(nudgeSignature(nudge));
+          }
+
+          const merged = [...filtered, ...enriched]
+            .sort((a, b) => a.createdAtMs - b.createdAtMs)
+            .slice(-3);
+
+          annotationCountRef.current += incomingNudges.length;
+          lastAnnotatedAtRef.current = Date.now();
+          lastAnnotatedParagraphRef.current = paragraphIndex;
+
+          return collapseStack(merged);
+        });
+
         setAnnotations((prev) => {
-          // Remove existing annotations for this paragraph
           const filtered = prev.filter((a) => a.paragraphIndex !== paragraphIndex);
 
-          // Add new ones, filtered by dismissal and already-shown signatures.
           const newOnes = data.annotations.filter((a) => {
             const sig = annotationSignature(a);
-            if (dismissedRef.current.has(sig)) return false;
-            if (shownRef.current.has(sig)) return false;
+            if (dismissedAnnotationsRef.current.has(sig)) return false;
+            if (shownAnnotationsRef.current.has(sig)) return false;
             return true;
           });
 
           if (newOnes.length > 0) {
             for (const annotation of newOnes) {
-              shownRef.current.add(annotationSignature(annotation));
+              shownAnnotationsRef.current.add(annotationSignature(annotation));
             }
-            annotationCountRef.current += newOnes.length;
-            lastAnnotatedAtRef.current = Date.now();
-            lastAnnotatedParagraphRef.current = paragraphIndex;
+            if (incomingNudges.length === 0) {
+              annotationCountRef.current += newOnes.length;
+              lastAnnotatedAtRef.current = Date.now();
+              lastAnnotatedParagraphRef.current = paragraphIndex;
+            }
           }
 
           return [...filtered, ...newOnes];
@@ -266,8 +407,8 @@ export function useMarginIntelligence({
         setInspector({
           phase: "done",
           message:
-            data.annotations.length > 0
-              ? "Found a margin nudge."
+            incomingNudges.length > 0
+              ? "Spark card ready."
               : data.trace?.reason || "No strong margin nudge this round.",
           paragraphIndex,
           paragraphPreview: paragraphText.slice(0, 120),
@@ -292,6 +433,7 @@ export function useMarginIntelligence({
   const handleParagraphChange = useCallback(
     (paragraph: { index: number; text: string }, fullMarkdown: string) => {
       if (!enabled) return;
+
       const text = paragraph.text.trim();
       if (text.length < resolvedTuning.client.minParagraphLength) {
         setInspector({
@@ -303,6 +445,7 @@ export function useMarginIntelligence({
         });
         return;
       }
+
       const wordCount = text.split(/\s+/).filter(Boolean).length;
       if (wordCount < resolvedTuning.client.minParagraphWords) {
         setInspector({
@@ -325,6 +468,7 @@ export function useMarginIntelligence({
         paragraphPreview: text.slice(0, 120),
         updatedAt: Date.now(),
       });
+
       debounceRef.current = setTimeout(() => {
         triggerQuery(text, fullMarkdown, paragraph.index);
       }, resolvedTuning.client.debounceMs);
@@ -335,14 +479,11 @@ export function useMarginIntelligence({
   const dismissAnnotation = useCallback((id: string) => {
     setAnnotations((prev) => {
       const target = prev.find((a) => a.id === id);
-      if (target) {
-        dismissedRef.current.add(annotationSignature(target));
-      }
+      if (target) dismissedAnnotationsRef.current.add(annotationSignature(target));
       return prev.filter((a) => a.id !== id);
     });
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -352,8 +493,13 @@ export function useMarginIntelligence({
 
   return {
     annotations,
+    nudges,
     handleParagraphChange,
     dismissAnnotation,
+    dismissNudge,
+    expandNudge,
+    submitNudgeFeedback,
     inspector,
+    sparkSummary,
   };
 }
