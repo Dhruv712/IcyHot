@@ -223,14 +223,6 @@ export default function JournalPage() {
     return () => document.body.removeAttribute("data-journal-focus");
   }, [chromeHidden]);
 
-  // Reset dirty state when entry loads
-  useEffect(() => {
-    if (entry) {
-      isDirtyRef.current = false;
-      setSaveStatus("idle");
-    }
-  }, [entry]);
-
   // Scroll to top when switching entries
   useEffect(() => {
     scrollRef.current?.scrollTo(0, 0);
@@ -308,10 +300,7 @@ export default function JournalPage() {
           setSaveStatus("saved");
 
           // Update the react-query cache so navigating back shows latest
-          const queryKey = [
-            "journal-entry",
-            savingDate === todayStr ? "today" : savingDate,
-          ];
+          const queryKey = ["journal-entry", savingDate];
           queryClient.setQueryData<JournalEntry>(queryKey, (old) =>
             old ? { ...old, content, exists: true, source: "db" } : old
           );
