@@ -73,10 +73,28 @@ export async function getJournalFileContent(path: string): Promise<string> {
  * Format: "February 15, 2026.md" → "2026-02-15"
  */
 export function parseJournalDate(filename: string): string | null {
-  const name = filename.replace(/\.md$/, "");
-  const d = new Date(name);
-  if (isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
+  const name = filename.replace(/\.md$/, "").trim();
+  const match = name.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (!match) return null;
+
+  const monthLabel = match[1];
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  const month = MONTHS.findIndex(
+    (m) => m.toLowerCase() === monthLabel.toLowerCase()
+  );
+  if (month < 0 || !Number.isInteger(day) || !Number.isInteger(year)) return null;
+
+  const check = new Date(year, month, day);
+  if (
+    check.getFullYear() !== year ||
+    check.getMonth() !== month ||
+    check.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 const MONTHS = [

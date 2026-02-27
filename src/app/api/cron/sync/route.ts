@@ -7,11 +7,17 @@ import { syncCalendarEvents } from "@/lib/calendar";
 import { commitDirtyDraftsToGithub } from "@/lib/github";
 import { generateDailyBriefing } from "@/lib/briefing";
 import { sendPushToUser } from "@/lib/push";
-import { snapshotHealthScore } from "@/lib/health";
+import { snapshotHealthScoreForDate } from "@/lib/health";
 import { generateWeeklyRetro } from "@/lib/retro";
 import { processMemories } from "@/lib/memory/pipeline";
 import { consolidateMemories } from "@/lib/memory/consolidate";
 import { generateProvocationsForUser } from "@/lib/memory/provoke";
+import { createConsolidationDigest } from "@/lib/memory/consolidationDigest";
+import {
+  getDateStringInTimeZone,
+  getWeekdayInTimeZone,
+} from "@/lib/timezone";
+import { getUserTimeZone } from "@/lib/userTimeZone";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -23,14 +29,27 @@ export async function GET(request: NextRequest) {
   }
 
   const allUsers = await db.select({ id: users.id }).from(users);
-  const isSunday = new Date().getUTCDay() === 0;
 
   const results: Array<{
     userId: string;
+    timeZone: string;
+    localDate: string;
     journal: { success: boolean; error?: string };
     calendar: { success: boolean; error?: string };
     memory: { success: boolean; error?: string };
-    consolidation: { success: boolean; error?: string };
+    consolidation: {
+      success: boolean;
+      digestDate?: string;
+      summary?: string;
+      changeCount?: number;
+      error?: string;
+    };
+    overnightPush: {
+      success: boolean;
+      sent?: number;
+      skipped?: string;
+      error?: string;
+    };
     provocations: { success: boolean; generated?: number; error?: string };
     briefing: { success: boolean; error?: string };
     push: { success: boolean; sent?: number; error?: string };
@@ -39,12 +58,20 @@ export async function GET(request: NextRequest) {
   }> = [];
 
   for (const user of allUsers) {
+    const now = new Date();
+    const timeZone = await getUserTimeZone(user.id);
+    const today = getDateStringInTimeZone(now, timeZone);
+    const isSunday = getWeekdayInTimeZone(now, timeZone) === 0;
+
     const result: (typeof results)[0] = {
       userId: user.id,
+      timeZone,
+      localDate: today,
       journal: { success: false },
       calendar: { success: false },
       memory: { success: false },
       consolidation: { success: false },
+      overnightPush: { success: false },
       provocations: { success: false },
       briefing: { success: false },
       push: { success: false },
@@ -93,6 +120,7 @@ export async function GET(request: NextRequest) {
       console.log(`[cron] No new content for ${user.id}, skipping briefing generation`);
       result.memory = { success: true };
       result.consolidation = { success: true };
+      result.overnightPush = { success: true, sent: 0, skipped: "No new content" };
       result.briefing = { success: true };
       result.push = { success: true, sent: 0 };
     } else {
@@ -110,18 +138,63 @@ export async function GET(request: NextRequest) {
 
       // Memory consolidation — discover connections + implications (failures don't block briefing)
       try {
-        await consolidateMemories(user.id);
-        result.consolidation = { success: true };
+        const runStartedAt = new Date();
+        const consolidation = await consolidateMemories(user.id);
+        const runCompletedAt = new Date();
+        const digest = await createConsolidationDigest({
+          userId: user.id,
+          digestDate: today,
+          timeZone,
+          runStartedAt,
+          runCompletedAt,
+          counts: consolidation,
+        });
+        result.consolidation = {
+          success: true,
+          digestDate: digest.digestDate,
+          summary: digest.summary,
+          changeCount: digest.changeCount,
+        };
+
+        if (digest.changeCount > 0) {
+          try {
+            const overnightPush = await sendPushToUser(user.id, {
+              title: "Overnight memory connections are ready",
+              body: digest.summary.slice(0, 200),
+              url: "/dashboard?tab=overnight",
+              tag: "icyhot-overnight",
+            });
+            result.overnightPush = {
+              success: true,
+              sent: overnightPush.sent,
+            };
+          } catch (pushError) {
+            console.error(`[cron] Overnight push failed for ${user.id}:`, pushError);
+            result.overnightPush = {
+              success: false,
+              error: pushError instanceof Error ? pushError.message : "Unknown error",
+            };
+          }
+        } else {
+          result.overnightPush = {
+            success: true,
+            sent: 0,
+            skipped: "No new overnight graph changes",
+          };
+        }
       } catch (error) {
         console.error(`[cron] Memory consolidation failed for ${user.id}:`, error);
         result.consolidation = {
           success: false,
           error: error instanceof Error ? error.message : "Unknown error",
         };
+        result.overnightPush = {
+          success: false,
+          skipped: "Consolidation failed",
+        };
       }
 
       // Invalidate stale briefing + suggestions so we regenerate with fresh synced data
-      const today = new Date().toISOString().slice(0, 10);
       try {
         await db.delete(dailyBriefings).where(
           and(eq(dailyBriefings.userId, user.id), eq(dailyBriefings.briefingDate, today))
@@ -135,7 +208,10 @@ export async function GET(request: NextRequest) {
 
       // Generate daily briefing with fresh data
       try {
-        const briefing = await generateDailyBriefing(user.id);
+        const briefing = await generateDailyBriefing(user.id, {
+          date: today,
+          timeZone,
+        });
         result.briefing = { success: true };
 
         // Send push notification with briefing summary
@@ -144,7 +220,8 @@ export async function GET(request: NextRequest) {
             const pushResult = await sendPushToUser(user.id, {
               title: "Your morning briefing",
               body: briefing.summary.slice(0, 200),
-              url: "/dashboard",
+              url: "/dashboard?tab=today",
+              tag: "icyhot-briefing",
             });
             result.push = { success: true, sent: pushResult.sent };
           } catch (pushError) {
@@ -154,6 +231,8 @@ export async function GET(request: NextRequest) {
               error: pushError instanceof Error ? pushError.message : "Unknown error",
             };
           }
+        } else {
+          result.push = { success: true, sent: 0 };
         }
       } catch (error) {
         console.error(`[cron] Briefing generation failed for ${user.id}:`, error);
@@ -166,7 +245,10 @@ export async function GET(request: NextRequest) {
 
     // Provocations — run daily regardless of new content (they look back 3 days into existing data)
     try {
-      const provResult = await generateProvocationsForUser(user.id);
+      const provResult = await generateProvocationsForUser(user.id, {
+        date: today,
+        timeZone,
+      });
       result.provocations = { success: true, generated: provResult.generated };
     } catch (error) {
       console.error(`[cron] Provocation generation failed for ${user.id}:`, error);
@@ -178,7 +260,7 @@ export async function GET(request: NextRequest) {
 
     // Daily health score snapshot
     try {
-      await snapshotHealthScore(user.id);
+      await snapshotHealthScoreForDate(user.id, { date: today, timeZone });
       result.healthSnapshot = { success: true };
     } catch (error) {
       console.error(`[cron] Health snapshot failed for ${user.id}:`, error);
@@ -192,7 +274,7 @@ export async function GET(request: NextRequest) {
     if (isSunday) {
       result.retro = { success: false };
       try {
-        const retro = await generateWeeklyRetro(user.id);
+        const retro = await generateWeeklyRetro(user.id, { timeZone });
         result.retro = { success: true };
 
         if (retro?.weekSummary) {
@@ -200,7 +282,7 @@ export async function GET(request: NextRequest) {
             await sendPushToUser(user.id, {
               title: "Your weekly retro is ready",
               body: retro.weekSummary.slice(0, 200),
-              url: "/dashboard",
+              url: "/dashboard?tab=week",
               tag: "icyhot-weekly-retro",
             });
           } catch (pushError) {

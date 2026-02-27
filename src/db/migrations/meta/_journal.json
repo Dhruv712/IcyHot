@@ -36,6 +36,13 @@
       "when": 1772169445772,
       "tag": "0004_rapid_thundra",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1772180225511,
+      "tag": "0005_consolidation_digest_timezone",
+      "breakpoints": true
     }
   ]
 }

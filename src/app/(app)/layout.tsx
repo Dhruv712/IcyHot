@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Sidebar from "@/components/Sidebar";
 import AddContactDialog from "@/components/AddContactDialog";
@@ -18,6 +18,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const calendarSync = useCalendarSync();
   const { data: journalStatus } = useJournalStatus();
   const journalSync = useJournalSync();
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!timeZone) return;
+
+    const cacheKey = `icyhot-timezone:${session.user.id}`;
+    if (typeof window !== "undefined" && localStorage.getItem(cacheKey) === timeZone) {
+      return;
+    }
+
+    fetch("/api/users/timezone", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timeZone }),
+    })
+      .then((res) => {
+        if (res.ok && typeof window !== "undefined") {
+          localStorage.setItem(cacheKey, timeZone);
+        }
+      })
+      .catch(() => {
+        // Non-blocking best-effort sync
+      });
+  }, [session?.user?.id]);
 
   const handleSyncCalendar = useCallback(() => {
     setSyncMessage("Syncing calendar...");

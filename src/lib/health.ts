@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { contacts, interactions, healthScoreSnapshots } from "@/db/schema";
 import { eq, and, gte } from "drizzle-orm";
 import { computeTemperature } from "./temperature";
+import { getDateStringInTimeZone, normalizeTimeZone } from "./timezone";
 
 /**
  * Compute network health score from a list of nodes with temperature and importance.
@@ -16,7 +17,7 @@ export function computeHealthScore(
     (sum, n) => sum + n.importance * n.temperature,
     0
   );
-  let score = totalImportance > 0
+  const score = totalImportance > 0
     ? Math.round((weightedTemp / totalImportance) * 100)
     : 0;
   // Penalize for neglected important contacts
@@ -30,8 +31,16 @@ export function computeHealthScore(
  * Take a daily snapshot of a user's health score and store it.
  */
 export async function snapshotHealthScore(userId: string): Promise<void> {
+  await snapshotHealthScoreForDate(userId, { timeZone: "UTC" });
+}
+
+export async function snapshotHealthScoreForDate(
+  userId: string,
+  options?: { timeZone?: string; date?: string }
+): Promise<void> {
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const timeZone = normalizeTimeZone(options?.timeZone);
+  const today = options?.date ?? getDateStringInTimeZone(now, timeZone);
   const sixMonthsAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
 
   // Fetch contacts and interactions

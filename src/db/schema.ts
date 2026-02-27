@@ -28,6 +28,7 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   image: text("image"),
+  timeZone: text("time_zone").default("UTC").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -332,6 +333,36 @@ export const weeklyRetros = pgTable(
   },
   (table) => [
     uniqueIndex("weekly_retros_user_week").on(table.userId, table.weekStart),
+  ]
+);
+
+// ── Consolidation Digests ───────────────────────────────────────────
+
+export const consolidationDigests = pgTable(
+  "consolidation_digests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    digestDate: date("digest_date").notNull(),
+    timeZone: text("time_zone").notNull(),
+    runStartedAt: timestamp("run_started_at").notNull(),
+    runCompletedAt: timestamp("run_completed_at").notNull(),
+    clustersProcessed: integer("clusters_processed").default(0).notNull(),
+    antiClustersProcessed: integer("anti_clusters_processed").default(0).notNull(),
+    connectionsCreated: integer("connections_created").default(0).notNull(),
+    connectionsStrengthened: integer("connections_strengthened").default(0).notNull(),
+    implicationsCreated: integer("implications_created").default(0).notNull(),
+    implicationsReinforced: integer("implications_reinforced").default(0).notNull(),
+    implicationsFiltered: integer("implications_filtered").default(0).notNull(),
+    summary: text("summary").notNull(),
+    details: text("details").notNull(), // JSON payload of created/reinforced items
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("consolidation_digests_user_date").on(table.userId, table.digestDate),
+    index("consolidation_digests_user_created_idx").on(table.userId, table.createdAt),
   ]
 );
 

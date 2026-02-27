@@ -14,6 +14,12 @@ import {
 } from "@/db/schema";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { retrieveMemories } from "./memory/retrieve";
+import {
+  addDaysToDateString,
+  getDateStringInTimeZone,
+  getUtcDayRangeForDateInTimeZone,
+  normalizeTimeZone,
+} from "./timezone";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -97,8 +103,12 @@ async function queryTodayProvocations(userId: string, today: string): Promise<Br
 
 // ── Generation ─────────────────────────────────────────────────────────
 
-export async function generateDailyBriefing(userId: string): Promise<DailyBriefingContent | null> {
-  const today = new Date().toISOString().slice(0, 10);
+export async function generateDailyBriefing(
+  userId: string,
+  options?: { date?: string; timeZone?: string }
+): Promise<DailyBriefingContent | null> {
+  const timeZone = normalizeTimeZone(options?.timeZone);
+  const today = options?.date ?? getDateStringInTimeZone(new Date(), timeZone);
 
   // Check if briefing already exists for today
   const [existing] = await db
@@ -128,9 +138,9 @@ export async function generateDailyBriefing(userId: string): Promise<DailyBriefi
     contactGroupMemberships,
   ] = await Promise.all([
     // Today's calendar events with matched contacts
-    getTodayCalendarEvents(userId, today),
+    getTodayCalendarEvents(userId, today, timeZone),
     // Recent insights (last 60 days, top by relevance)
-    getRecentInsights(userId, 60),
+    getRecentInsights(userId, 60, today),
     // Recent interactions (last 30 days)
     getRecentInteractions(userId, 30),
     // Active open loops (not resolved, not snoozed past today)
@@ -521,9 +531,11 @@ Only include contacts that appear in the context above.`,
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-async function getTodayCalendarEvents(userId: string, today: string) {
-  const startOfDay = new Date(today + "T00:00:00");
-  const endOfDay = new Date(today + "T23:59:59");
+async function getTodayCalendarEvents(userId: string, today: string, timeZone: string) {
+  const { start: startOfDay, end: endOfDay } = getUtcDayRangeForDateInTimeZone(
+    today,
+    timeZone
+  );
 
   const events = await db
     .select({
@@ -553,10 +565,8 @@ async function getTodayCalendarEvents(userId: string, today: string) {
   }));
 }
 
-async function getRecentInsights(userId: string, days: number) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+async function getRecentInsights(userId: string, days: number, today: string) {
+  const cutoffStr = addDaysToDateString(today, -days);
 
   return db
     .select({

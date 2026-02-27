@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { dailyBriefings, provocations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { generateDailyBriefing, type DailyBriefingContent, type BriefingProvocation } from "@/lib/briefing";
+import { getUserTimeZone } from "@/lib/userTimeZone";
+import { getDateStringInTimeZone } from "@/lib/timezone";
 
 export const maxDuration = 60;
 
@@ -13,7 +15,8 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const timeZone = await getUserTimeZone(session.user.id);
+  const today = getDateStringInTimeZone(new Date(), timeZone);
 
   // Try to read cached briefing first
   const [cached] = await db
@@ -67,7 +70,10 @@ export async function GET() {
   }
 
   // Generate on-demand if not cached (e.g., cron hasn't run yet)
-  const briefing = await generateDailyBriefing(session.user.id);
+  const briefing = await generateDailyBriefing(session.user.id, {
+    date: today,
+    timeZone,
+  });
 
   if (!briefing) {
     return NextResponse.json({ briefing: null, date: today, cached: false });
@@ -87,7 +93,8 @@ export async function POST() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const timeZone = await getUserTimeZone(session.user.id);
+  const today = getDateStringInTimeZone(new Date(), timeZone);
 
   // Delete cached briefing for today
   await db
@@ -100,7 +107,10 @@ export async function POST() {
     );
 
   // Regenerate
-  const briefing = await generateDailyBriefing(session.user.id);
+  const briefing = await generateDailyBriefing(session.user.id, {
+    date: today,
+    timeZone,
+  });
 
   return NextResponse.json({
     briefing: briefing || null,

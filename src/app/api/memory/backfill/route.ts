@@ -8,6 +8,8 @@ import { consolidateMemories } from "@/lib/memory/consolidate";
 import { generateProvocationsForUser } from "@/lib/memory/provoke";
 import { abstractMemory } from "@/lib/memory/abstract";
 import { embedSingle } from "@/lib/memory/embed";
+import { getDateStringInTimeZone } from "@/lib/timezone";
+import { getUserTimeZone } from "@/lib/userTimeZone";
 
 export const maxDuration = 300; // Vercel Hobby with fluid compute allows up to 300s
 
@@ -87,7 +89,8 @@ export async function POST(request: NextRequest) {
 
   // Regenerate provocations: delete today's provocations, then regenerate
   if (regenerateProvocations) {
-    const today = new Date().toISOString().slice(0, 10);
+    const timeZone = await getUserTimeZone(userId);
+    const today = getDateStringInTimeZone(new Date(), timeZone);
     const deleted = await db
       .delete(provocations)
       .where(and(eq(provocations.userId, userId), eq(provocations.date, today)))
@@ -96,7 +99,10 @@ export async function POST(request: NextRequest) {
     console.log(`[backfill] Deleted ${deleted.length} provocations for ${today}`);
 
     try {
-      const result = await generateProvocationsForUser(userId);
+      const result = await generateProvocationsForUser(userId, {
+        date: today,
+        timeZone,
+      });
       return NextResponse.json({
         success: true,
         regenerateProvocations: true,

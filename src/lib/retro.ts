@@ -8,13 +8,18 @@ import {
   calendarEvents,
   calendarEventContacts,
   weeklyRetros,
-  healthScoreSnapshots,
 } from "@/db/schema";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte, lt, desc } from "drizzle-orm";
 import { computeTemperature } from "./temperature";
 import { retrieveMemories } from "./memory/retrieve";
 import { computeHealthScore } from "./health";
 import { computeStreaks, type ContactStreak } from "./streaks";
+import {
+  addDaysToDateString,
+  getMondayDateStringInTimeZone,
+  getUtcDayRangeForDateInTimeZone,
+  normalizeTimeZone,
+} from "./timezone";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -57,23 +62,21 @@ export interface WeeklyRetroContent {
 
 // ── Generation ─────────────────────────────────────────────────────────
 
-function getMonday(d: Date): Date {
-  const day = d.getUTCDay();
-  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d);
-  monday.setUTCDate(diff);
-  monday.setUTCHours(0, 0, 0, 0);
-  return monday;
-}
-
 export async function generateWeeklyRetro(
-  userId: string
+  userId: string,
+  options?: { timeZone?: string; weekStart?: string }
 ): Promise<WeeklyRetroContent | null> {
   const now = new Date();
-  const weekStart = getMonday(now);
-  const weekStartStr = weekStart.toISOString().slice(0, 10);
-  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const priorWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const timeZone = normalizeTimeZone(options?.timeZone);
+  const weekStartStr =
+    options?.weekStart ?? getMondayDateStringInTimeZone(now, timeZone);
+  const nextWeekStartStr = addDaysToDateString(weekStartStr, 7);
+  const nextWeekEndStr = addDaysToDateString(weekStartStr, 14);
+  const priorWeekStartStr = addDaysToDateString(weekStartStr, -7);
+  const weekStart = getUtcDayRangeForDateInTimeZone(weekStartStr, timeZone).start;
+  const weekEnd = getUtcDayRangeForDateInTimeZone(nextWeekStartStr, timeZone).start;
+  const nextWeekEnd = getUtcDayRangeForDateInTimeZone(nextWeekEndStr, timeZone).start;
+  const priorWeekStart = getUtcDayRangeForDateInTimeZone(priorWeekStartStr, timeZone).start;
   const sixMonthsAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
 
   // Cache check
@@ -115,7 +118,7 @@ export async function generateWeeklyRetro(
         and(
           eq(interactions.userId, userId),
           gte(interactions.occurredAt, weekStart),
-          lte(interactions.occurredAt, weekEnd)
+          lt(interactions.occurredAt, weekEnd)
         )
       )
       .orderBy(desc(interactions.occurredAt)),
@@ -132,7 +135,7 @@ export async function generateWeeklyRetro(
         and(
           eq(interactions.userId, userId),
           gte(interactions.occurredAt, priorWeekStart),
-          lte(interactions.occurredAt, weekStart)
+          lt(interactions.occurredAt, weekStart)
         )
       ),
 
@@ -175,7 +178,7 @@ export async function generateWeeklyRetro(
         and(
           eq(journalInsights.userId, userId),
           gte(journalInsights.entryDate, weekStartStr),
-          lte(journalInsights.entryDate, weekEnd.toISOString().slice(0, 10))
+          lte(journalInsights.entryDate, addDaysToDateString(weekStartStr, 6))
         )
       ),
 
@@ -212,10 +215,7 @@ export async function generateWeeklyRetro(
         and(
           eq(calendarEvents.userId, userId),
           gte(calendarEvents.startTime, weekEnd),
-          lte(
-            calendarEvents.startTime,
-            new Date(weekEnd.getTime() + 7 * 24 * 60 * 60 * 1000)
-          ),
+          lt(calendarEvents.startTime, nextWeekEnd),
           eq(calendarEventContacts.confirmed, true)
         )
       )

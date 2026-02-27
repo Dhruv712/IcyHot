@@ -27,6 +27,8 @@ import {
   type SparkNudgeType,
 } from "@/lib/marginSpark";
 import { retrieveMemories } from "@/lib/memory/retrieve";
+import { getDateStringInTimeZone } from "@/lib/timezone";
+import { getUserTimeZone } from "@/lib/userTimeZone";
 
 export const maxDuration = 15;
 
@@ -556,7 +558,10 @@ export async function POST(request: NextRequest) {
   const resolvedEntryDate =
     typeof entryDate === "string" && entryDate.length >= 10
       ? entryDate.slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
+      : getDateStringInTimeZone(
+          new Date(),
+          await getUserTimeZone(session.user.id),
+        );
   const paragraphHash = hashParagraph(trimmedParagraph);
 
   const zeroDistribution = {

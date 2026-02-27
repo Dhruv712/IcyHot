@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { contacts, interactions, dailySuggestions } from "@/db/schema";
 import { auth } from "@/auth";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import { computeTemperature, temperatureToColor, temperatureLabel } from "@/lib/temperature";
 import { nudgeScore } from "@/lib/physics";
 import { RELATIONSHIP_LABELS } from "@/lib/constants";
 import Anthropic from "@anthropic-ai/sdk";
+import { addDaysToDateString, getDateStringInTimeZone, getUtcDayRangeForDateInTimeZone } from "@/lib/timezone";
+import { getUserTimeZone } from "@/lib/userTimeZone";
 
 interface Suggestion {
   id: string;
@@ -26,7 +28,13 @@ export async function GET() {
 
   const userId = session.user.id!;
   const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+  const timeZone = await getUserTimeZone(userId);
+  const todayStr = getDateStringInTimeZone(now, timeZone);
+  const todayStart = getUtcDayRangeForDateInTimeZone(todayStr, timeZone).start;
+  const tomorrowStart = getUtcDayRangeForDateInTimeZone(
+    addDaysToDateString(todayStr, 1),
+    timeZone,
+  ).start;
 
   // ── Check for cached suggestions for today ─────────────────────────
   const cached = await db
@@ -136,8 +144,6 @@ export async function GET() {
   }
 
   // Build candidate list with temperature + nudgeScore
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
   const candidates = allContacts.map((contact) => {
     const contactIxs = interactionsByContact.get(contact.id) || [];
     const temperature = computeTemperature(
@@ -154,7 +160,7 @@ export async function GET() {
 
     const lastIx = sorted[0] ?? null;
     const interactedToday = lastIx
-      ? new Date(lastIx.occurredAt.getFullYear(), lastIx.occurredAt.getMonth(), lastIx.occurredAt.getDate()).getTime() === today.getTime()
+      ? lastIx.occurredAt >= todayStart && lastIx.occurredAt < tomorrowStart
       : false;
 
     return {

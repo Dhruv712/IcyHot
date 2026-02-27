@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useGraphData } from "@/hooks/useGraphData";
 import { useCalendarStatus } from "@/hooks/useCalendar";
 import Tabs from "@/components/ui/Tabs";
 import BriefingView from "@/components/dashboard/BriefingView";
 import RetroView from "@/components/dashboard/RetroView";
+import OvernightView from "@/components/dashboard/OvernightView";
 import HealthCard from "@/components/dashboard/HealthCard";
 import StatsRow from "@/components/dashboard/StatsRow";
 // ReachOutCard functionality is now integrated into BriefingView
@@ -14,18 +16,43 @@ import InsightCard from "@/components/dashboard/InsightCard";
 import NewPeopleCard from "@/components/dashboard/NewPeopleCard";
 import UnmatchedCard from "@/components/dashboard/UnmatchedCard";
 
+type DashboardTabKey = "today" | "overnight" | "week";
+
 const DASHBOARD_TABS = [
   { key: "today", label: "Today", icon: "☀️" },
+  { key: "overnight", label: "Overnight", icon: "✨" },
   { key: "week", label: "This Week", icon: "📊" },
 ];
 
+function isTabKey(value: string | null): value is DashboardTabKey {
+  return value === "today" || value === "overnight" || value === "week";
+}
+
 export default function DashboardPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { data: graphData, isLoading } = useGraphData();
   const { data: calendarStatus } = useCalendarStatus();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("today");
-
+  const activeTab: DashboardTabKey = isTabKey(searchParams.get("tab"))
+    ? (searchParams.get("tab") as DashboardTabKey)
+    : "today";
   const contactNodes = graphData?.nodes ?? [];
+
+  const handleTabChange = (nextTab: DashboardTabKey) => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    if (nextTab === "today") {
+      nextParams.delete("tab");
+    } else {
+      nextParams.set("tab", nextTab);
+    }
+
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+      scroll: false,
+    });
+  };
 
   if (isLoading) {
     return (
@@ -39,11 +66,23 @@ export default function DashboardPage() {
     <div className="h-full overflow-y-auto">
       {/* Tab toggle */}
       <div className="max-w-[640px] mx-auto px-4 pt-3 md:px-6 md:pt-4">
-        <Tabs tabs={DASHBOARD_TABS} activeKey={activeTab} onChange={setActiveTab} />
+        <Tabs
+          tabs={DASHBOARD_TABS}
+          activeKey={activeTab}
+          onChange={(key) => {
+            if (isTabKey(key)) handleTabChange(key);
+          }}
+        />
       </div>
 
       {/* Tab content */}
-      {activeTab === "today" ? <BriefingView /> : <RetroView />}
+      {activeTab === "today" ? (
+        <BriefingView />
+      ) : activeTab === "overnight" ? (
+        <OvernightView />
+      ) : (
+        <RetroView />
+      )}
 
       {/* Zen divider before details */}
       <div className="max-w-[640px] mx-auto px-6 py-2">

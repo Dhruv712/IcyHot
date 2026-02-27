@@ -4,17 +4,10 @@ import { db } from "@/db";
 import { weeklyRetros } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { generateWeeklyRetro, type WeeklyRetroContent } from "@/lib/retro";
+import { getUserTimeZone } from "@/lib/userTimeZone";
+import { getMondayDateStringInTimeZone } from "@/lib/timezone";
 
 export const maxDuration = 120;
-
-function getMonday(d: Date): string {
-  const day = d.getUTCDay();
-  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d);
-  monday.setUTCDate(diff);
-  monday.setUTCHours(0, 0, 0, 0);
-  return monday.toISOString().slice(0, 10);
-}
 
 export async function GET() {
   const session = await auth();
@@ -22,7 +15,8 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const weekStart = getMonday(new Date());
+  const timeZone = await getUserTimeZone(session.user.id);
+  const weekStart = getMondayDateStringInTimeZone(new Date(), timeZone);
 
   // Try cached
   const [cached] = await db
@@ -44,7 +38,10 @@ export async function GET() {
   }
 
   // Lazy-generate
-  const retro = await generateWeeklyRetro(session.user.id);
+  const retro = await generateWeeklyRetro(session.user.id, {
+    timeZone,
+    weekStart,
+  });
 
   if (!retro) {
     return NextResponse.json({ retro: null, weekStart, cached: false });
@@ -60,7 +57,8 @@ export async function POST() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const weekStart = getMonday(new Date());
+  const timeZone = await getUserTimeZone(session.user.id);
+  const weekStart = getMondayDateStringInTimeZone(new Date(), timeZone);
 
   // Delete cached
   await db
@@ -72,7 +70,10 @@ export async function POST() {
       )
     );
 
-  const retro = await generateWeeklyRetro(session.user.id);
+  const retro = await generateWeeklyRetro(session.user.id, {
+    timeZone,
+    weekStart,
+  });
 
   return NextResponse.json({
     retro: retro || null,

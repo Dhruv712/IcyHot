@@ -14,12 +14,16 @@ import { db } from "@/db";
 import {
   memories,
   journalInsights,
-  memoryImplications,
   provocations,
 } from "@/db/schema";
 import { eq, sql, and, gte } from "drizzle-orm";
 import { retrieveMemories } from "./retrieve";
 import { embedSingle } from "./embed";
+import {
+  addDaysToDateString,
+  getDateStringInTimeZone,
+  normalizeTimeZone,
+} from "@/lib/timezone";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -47,11 +51,12 @@ interface GeneratedProvocation {
 
 async function extractAssertions(
   userId: string,
-  lookbackDays = 3
+  lookbackDays = 3,
+  options?: { today?: string; timeZone?: string }
 ): Promise<Assertion[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - lookbackDays);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const timeZone = normalizeTimeZone(options?.timeZone);
+  const today = options?.today ?? getDateStringInTimeZone(new Date(), timeZone);
+  const cutoffStr = addDaysToDateString(today, -lookbackDays);
 
   // Get recent insights (personal reflections, recurring themes)
   const recentInsights = await db
@@ -384,10 +389,12 @@ Generate at most ${max} provocations. Only include ones where the counter-eviden
 // ── Orchestrator ──────────────────────────────────────────────────────
 
 export async function generateProvocationsForUser(
-  userId: string
+  userId: string,
+  options?: { date?: string; timeZone?: string }
 ): Promise<{ generated: number; errors: string[] }> {
   const errors: string[] = [];
-  const today = new Date().toISOString().slice(0, 10);
+  const timeZone = normalizeTimeZone(options?.timeZone);
+  const today = options?.date ?? getDateStringInTimeZone(new Date(), timeZone);
 
   // Check if we already generated provocations today
   const existing = await db
@@ -406,7 +413,7 @@ export async function generateProvocationsForUser(
   // Stage A: Extract assertions
   let assertions: Assertion[] = [];
   try {
-    assertions = await extractAssertions(userId);
+    assertions = await extractAssertions(userId, 3, { today, timeZone });
     console.log(`[provoke] Extracted ${assertions.length} assertions`);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

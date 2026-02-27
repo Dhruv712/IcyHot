@@ -9,7 +9,6 @@ import { useHabits } from "@/hooks/useHabits";
 import { useLogInteraction } from "@/hooks/useInteractions";
 import { useDismissProvocation } from "@/hooks/useProvocations";
 import BriefingSection from "./BriefingSection";
-import type { DailyBriefingContent } from "@/lib/briefing";
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr + "T12:00:00");
@@ -23,11 +22,14 @@ function formatDate(dateStr: string): string {
 function addDays(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
+  return toLocalYmd(d);
 }
 
-function getTodayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+function toLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 const PINGED_KEY_PREFIX = "icyhot-daily-pinged-";
@@ -35,7 +37,7 @@ const PINGED_KEY_PREFIX = "icyhot-daily-pinged-";
 function loadPingedIds(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
-    const stored = localStorage.getItem(PINGED_KEY_PREFIX + getTodayStr());
+    const stored = localStorage.getItem(PINGED_KEY_PREFIX + toLocalYmd(new Date()));
     return stored ? new Set(JSON.parse(stored)) : new Set();
   } catch {
     return new Set();
@@ -43,7 +45,7 @@ function loadPingedIds(): Set<string> {
 }
 
 function savePingedIds(ids: Set<string>) {
-  localStorage.setItem(PINGED_KEY_PREFIX + getTodayStr(), JSON.stringify([...ids]));
+  localStorage.setItem(PINGED_KEY_PREFIX + toLocalYmd(new Date()), JSON.stringify([...ids]));
 }
 
 export default function BriefingView() {
@@ -98,7 +100,7 @@ export default function BriefingView() {
   }
 
   const briefing = data?.briefing;
-  const dateStr = data?.date || new Date().toISOString().slice(0, 10);
+  const dateStr = data?.date || toLocalYmd(new Date());
   const activeLoops = loops?.filter((l) => !l.resolved) ?? [];
   const suggestions = suggestionsData?.suggestions ?? [];
   const unpingedSuggestions = suggestions.filter((s) => !pingedIds.has(s.id));
@@ -568,4 +570,3 @@ function HabitsContent({
     </div>
   );
 }
-
