@@ -57,6 +57,8 @@ export interface SparkSummary {
   };
 }
 
+const SPARK_LOCAL_STORAGE_PREFIX = "icyhot-spark-cards-v1";
+
 function simpleHash(text: string): string {
   let h = 0;
   for (let i = 0; i < text.length; i++) {
@@ -90,6 +92,39 @@ function collapseStack(cards: SparkNudgeCard[]): SparkNudgeCard[] {
     ...card,
     collapsed: idx < sorted.length - 1,
   }));
+}
+
+function sparkStorageKey(entryDate: string): string {
+  return `${SPARK_LOCAL_STORAGE_PREFIX}:${entryDate}`;
+}
+
+function parseCachedNudges(raw: string | null): SparkNudgeCard[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const cards = parsed
+      .filter((item): item is SparkNudgeCard => {
+        if (!item || typeof item !== "object") return false;
+        const candidate = item as Partial<SparkNudgeCard>;
+        return (
+          typeof candidate.id === "string" &&
+          (candidate.type === "tension" ||
+            candidate.type === "callback" ||
+            candidate.type === "eyebrow_raise") &&
+          typeof candidate.hook === "string" &&
+          typeof candidate.whyNow === "string" &&
+          typeof candidate.actionPrompt === "string" &&
+          typeof candidate.paragraphIndex === "number" &&
+          typeof candidate.paragraphHash === "string" &&
+          typeof candidate.createdAtMs === "number"
+        );
+      })
+      .slice(-3);
+    return collapseStack(cards);
+  } catch {
+    return [];
+  }
 }
 
 export function useMarginIntelligence({
@@ -156,8 +191,13 @@ export function useMarginIntelligence({
   }, [nudges]);
 
   useEffect(() => {
+    const cached =
+      typeof window !== "undefined"
+        ? parseCachedNudges(window.localStorage.getItem(sparkStorageKey(entryDate)))
+        : [];
+
     setAnnotations([]);
-    setNudges([]);
+    setNudges(cached);
     setInspector({
       phase: "idle",
       message: "Idle",
@@ -174,7 +214,22 @@ export function useMarginIntelligence({
     lastAnnotatedAtRef.current = 0;
     annotationCountRef.current = 0;
     lastAnnotatedParagraphRef.current = -Infinity;
+    for (const nudge of cached) {
+      shownNudgesRef.current.add(nudgeSignature(nudge));
+    }
   }, [entryDate]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        sparkStorageKey(entryDate),
+        JSON.stringify(nudges.slice(-3)),
+      );
+    } catch (error) {
+      console.warn("[margin] Failed to persist spark cache:", error);
+    }
+  }, [entryDate, nudges]);
 
   useEffect(() => {
     queriedHashesRef.current.clear();

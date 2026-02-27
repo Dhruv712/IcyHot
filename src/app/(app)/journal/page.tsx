@@ -33,6 +33,13 @@ const FOCUS_MOUSE_IDLE = 2_000; // re-fade after mouse stops for 2s
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+function toLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function JournalPage() {
   const queryClient = useQueryClient();
 
@@ -55,10 +62,10 @@ export default function JournalPage() {
     }
   });
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = toLocalYmd(new Date());
   const entryDate = selectedDate ?? todayStr;
 
-  const { data: entry, isLoading } = useJournalEntry(selectedDate);
+  const { data: entry, isLoading } = useJournalEntry(entryDate);
   const { data: entriesData } = useJournalEntries();
   const saveMutation = useSaveJournalEntry();
   const {

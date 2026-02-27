@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { journalDrafts, journalSyncState } from "@/db/schema";
+import { journalDrafts } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { journalFilename, getJournalFileContent, getJournalFileSha, parseJournalDate } from "@/lib/github";
+import { journalFilename, getJournalFileContent, getJournalFileSha } from "@/lib/github";
 
 export const maxDuration = 30;
+
+function toLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 /**
  * GET — Load a journal entry for a given date (defaults to today).
@@ -19,8 +26,11 @@ export async function GET(request: NextRequest) {
   }
 
   const dateParam = request.nextUrl.searchParams.get("date");
-  const d = dateParam ? new Date(dateParam + "T12:00:00") : new Date();
-  const entryDate = d.toISOString().slice(0, 10);
+  const entryDate =
+    dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      ? dateParam
+      : toLocalYmd(new Date());
+  const d = new Date(`${entryDate}T12:00:00`);
   const filename = journalFilename(d);
 
   try {
