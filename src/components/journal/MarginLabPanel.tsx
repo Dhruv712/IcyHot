@@ -1,12 +1,14 @@
 "use client";
 
 import type { MarginTuningSettings } from "@/lib/marginTuning";
+import type { MarginInspectorState } from "@/hooks/useMarginIntelligence";
 
 interface MarginLabPanelProps {
   value: MarginTuningSettings;
   onChange: (next: MarginTuningSettings) => void;
   onReset: () => void;
   onApplyPreset: (preset: "subtle" | "balanced" | "generous") => void;
+  inspector: MarginInspectorState;
 }
 
 function NumberField({
@@ -45,6 +47,7 @@ export default function MarginLabPanel({
   onChange,
   onReset,
   onApplyPreset,
+  inspector,
 }: MarginLabPanelProps) {
   const setClient = <K extends keyof MarginTuningSettings["client"]>(
     key: K,
@@ -74,6 +77,62 @@ export default function MarginLabPanel({
 
   return (
     <div className="h-full overflow-y-auto p-3 space-y-4">
+      <div className="space-y-2 border border-[var(--border-subtle)] rounded-xl p-3 bg-[var(--bg-elevated)]">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+            Live Trace
+          </div>
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full ${
+              inspector.phase === "querying"
+                ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                : inspector.phase === "error"
+                  ? "bg-red-500/10 text-red-400"
+                  : "bg-[var(--bg-base)] text-[var(--text-muted)]"
+            }`}
+          >
+            {inspector.phase}
+          </span>
+        </div>
+        <div className="text-xs text-[var(--text-secondary)]">{inspector.message}</div>
+        {inspector.paragraphPreview && (
+          <div className="text-[11px] text-[var(--text-muted)] italic line-clamp-2">
+            &ldquo;{inspector.paragraphPreview}&rdquo;
+          </div>
+        )}
+        {inspector.trace && (
+          <div className="text-[11px] space-y-1.5 mt-1.5 pt-1.5 border-t border-[var(--border-subtle)]">
+            <div className="text-[var(--text-secondary)]">{inspector.trace.reason}</div>
+            {inspector.trace.retrieval && (
+              <div className="space-y-0.5 text-[var(--text-muted)]">
+                <div>
+                  Retrieval: {inspector.trace.retrieval.strongMemories}/
+                  {inspector.trace.retrieval.totalMemories} strong
+                </div>
+                <div>
+                  Top: {inspector.trace.retrieval.topScore.toFixed(3)} vs{" "}
+                  {inspector.trace.retrieval.secondScore.toFixed(3)} · clear signal:{" "}
+                  {inspector.trace.retrieval.hasClearSignal ? "yes" : "no"}
+                </div>
+                <div>
+                  Implications: {inspector.trace.retrieval.implications}
+                </div>
+              </div>
+            )}
+            {inspector.trace.llm && (
+              <div className="text-[var(--text-muted)]">
+                LLM: accepted {inspector.trace.llm.accepted}/
+                {inspector.trace.llm.parsed} · min conf {inspector.trace.llm.minModelConfidence}
+              </div>
+            )}
+            <div className="text-[var(--text-muted)]">
+              Timing: retrieve {inspector.trace.timingsMs.retrieve}ms · llm{" "}
+              {inspector.trace.timingsMs.llm}ms · total {inspector.trace.timingsMs.total}ms
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="space-y-2">
         <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
           Presets

@@ -19,6 +19,43 @@ export interface MarginAnnotation {
 interface MarginResponse {
   annotations: MarginAnnotation[];
   paragraphHash: string;
+  trace?: MarginTrace;
+}
+
+export interface MarginTrace {
+  reason: string;
+  retrieval?: {
+    totalMemories: number;
+    strongMemories: number;
+    topScore: number;
+    secondScore: number;
+    hasClearSignal: boolean;
+    implications: number;
+    topSamples: Array<{
+      score: number;
+      hop: number;
+      snippet: string;
+    }>;
+  };
+  llm?: {
+    parsed: number;
+    accepted: number;
+    minModelConfidence: number;
+  };
+  timingsMs: {
+    retrieve: number;
+    llm: number;
+    total: number;
+  };
+}
+
+export interface MarginInspectorState {
+  phase: "idle" | "debouncing" | "querying" | "done" | "error";
+  message: string;
+  paragraphIndex?: number;
+  paragraphPreview?: string;
+  trace?: MarginTrace;
+  updatedAt: number;
 }
 
 function simpleHash(text: string): string {
@@ -54,6 +91,11 @@ export function useMarginIntelligence({
   const tuningKey = useMemo(() => JSON.stringify(resolvedTuning), [resolvedTuning]);
 
   const [annotations, setAnnotations] = useState<MarginAnnotation[]>([]);
+  const [inspector, setInspector] = useState<MarginInspectorState>({
+    phase: "idle",
+    message: "Idle",
+    updatedAt: 0,
+  });
   const dismissedRef = useRef(new Set<string>());
   const shownRef = useRef(new Set<string>());
   const queriedHashesRef = useRef(new Set<string>());
@@ -68,6 +110,11 @@ export function useMarginIntelligence({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset when switching journal entries
     setAnnotations([]);
+    setInspector({
+      phase: "idle",
+      message: "Idle",
+      updatedAt: Date.now(),
+    });
     dismissedRef.current.clear();
     shownRef.current.clear();
     queriedHashesRef.current.clear();
@@ -83,6 +130,12 @@ export function useMarginIntelligence({
   useEffect(() => {
     queriedHashesRef.current.clear();
     lastQueryAtRef.current = 0;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional refresh after tuning changes
+    setInspector({
+      phase: "idle",
+      message: "Settings updated. Ready for next paragraph.",
+      updatedAt: Date.now(),
+    });
   }, [tuningKey]);
 
   const triggerQuery = useCallback(
@@ -95,24 +148,52 @@ export function useMarginIntelligence({
         annotationCountRef.current >=
         resolvedTuning.client.maxAnnotationsPerEntry
       ) {
+        setInspector({
+          phase: "done",
+          message: `Skipped: entry annotation cap (${resolvedTuning.client.maxAnnotationsPerEntry}) reached.`,
+          paragraphIndex,
+          paragraphPreview: paragraphText.slice(0, 120),
+          updatedAt: Date.now(),
+        });
         return;
       }
       if (
         Math.abs(paragraphIndex - lastAnnotatedParagraphRef.current) <=
         resolvedTuning.client.minParagraphGap
       ) {
+        setInspector({
+          phase: "done",
+          message: `Skipped: too close to last annotated paragraph (gap <= ${resolvedTuning.client.minParagraphGap}).`,
+          paragraphIndex,
+          paragraphPreview: paragraphText.slice(0, 120),
+          updatedAt: Date.now(),
+        });
         return;
       }
       if (
         Date.now() - lastAnnotatedAtRef.current <
         resolvedTuning.client.annotationCooldownMs
       ) {
+        setInspector({
+          phase: "done",
+          message: `Skipped: cooldown active (${resolvedTuning.client.annotationCooldownMs}ms).`,
+          paragraphIndex,
+          paragraphPreview: paragraphText.slice(0, 120),
+          updatedAt: Date.now(),
+        });
         return;
       }
       if (
         Date.now() - lastQueryAtRef.current <
         resolvedTuning.client.minQueryGapMs
       ) {
+        setInspector({
+          phase: "done",
+          message: `Skipped: query gap active (${resolvedTuning.client.minQueryGapMs}ms).`,
+          paragraphIndex,
+          paragraphPreview: paragraphText.slice(0, 120),
+          updatedAt: Date.now(),
+        });
         return;
       }
 
@@ -120,6 +201,13 @@ export function useMarginIntelligence({
       if (queriedHashesRef.current.has(hash)) return;
       queriedHashesRef.current.add(hash);
       lastQueryAtRef.current = Date.now();
+      setInspector({
+        phase: "querying",
+        message: "Scanning memories and patterns...",
+        paragraphIndex,
+        paragraphPreview: paragraphText.slice(0, 120),
+        updatedAt: Date.now(),
+      });
 
       // Cancel any in-flight request
       abortRef.current?.abort();
@@ -166,9 +254,28 @@ export function useMarginIntelligence({
 
           return [...filtered, ...newOnes];
         });
+
+        setInspector({
+          phase: "done",
+          message:
+            data.annotations.length > 0
+              ? "Found a margin nudge."
+              : data.trace?.reason || "No strong margin nudge this round.",
+          paragraphIndex,
+          paragraphPreview: paragraphText.slice(0, 120),
+          trace: data.trace,
+          updatedAt: Date.now(),
+        });
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
         console.error("[margin] Query failed:", e);
+        setInspector({
+          phase: "error",
+          message: e instanceof Error ? e.message : "Margin query failed",
+          paragraphIndex,
+          paragraphPreview: paragraphText.slice(0, 120),
+          updatedAt: Date.now(),
+        });
       }
     },
     [entryDate, resolvedTuning],
@@ -178,11 +285,38 @@ export function useMarginIntelligence({
     (paragraph: { index: number; text: string }, fullMarkdown: string) => {
       if (!enabled) return;
       const text = paragraph.text.trim();
-      if (text.length < resolvedTuning.client.minParagraphLength) return;
+      if (text.length < resolvedTuning.client.minParagraphLength) {
+        setInspector({
+          phase: "done",
+          message: `Waiting for a longer paragraph (${text.length}/${resolvedTuning.client.minParagraphLength} chars).`,
+          paragraphIndex: paragraph.index,
+          paragraphPreview: text.slice(0, 120),
+          updatedAt: Date.now(),
+        });
+        return;
+      }
       const wordCount = text.split(/\s+/).filter(Boolean).length;
-      if (wordCount < resolvedTuning.client.minParagraphWords) return;
+      if (wordCount < resolvedTuning.client.minParagraphWords) {
+        setInspector({
+          phase: "done",
+          message: `Waiting for more words (${wordCount}/${resolvedTuning.client.minParagraphWords}).`,
+          paragraphIndex: paragraph.index,
+          paragraphPreview: text.slice(0, 120),
+          updatedAt: Date.now(),
+        });
+        return;
+      }
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      setInspector({
+        phase: "debouncing",
+        message: `Paused. Querying in ${Math.round(
+          resolvedTuning.client.debounceMs / 1000,
+        )}s...`,
+        paragraphIndex: paragraph.index,
+        paragraphPreview: text.slice(0, 120),
+        updatedAt: Date.now(),
+      });
       debounceRef.current = setTimeout(() => {
         triggerQuery(text, fullMarkdown, paragraph.index);
       }, resolvedTuning.client.debounceMs);
@@ -212,5 +346,6 @@ export function useMarginIntelligence({
     annotations,
     handleParagraphChange,
     dismissAnnotation,
+    inspector,
   };
 }

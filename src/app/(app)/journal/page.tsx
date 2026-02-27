@@ -64,6 +64,7 @@ export default function JournalPage() {
     annotations: marginAnnotations,
     handleParagraphChange: handleMarginParagraph,
     dismissAnnotation,
+    inspector: marginInspector,
   } = useMarginIntelligence({
     entryDate,
     enabled: !isLoading,
@@ -482,6 +483,22 @@ export default function JournalPage() {
               {saveStatus === "error" && "Save failed — retrying..."}
             </span>
 
+            {/* Margin trace status */}
+            <span
+              className={`text-[11px] ${
+                marginInspector.phase === "querying"
+                  ? "text-[var(--amber)]"
+                  : marginInspector.phase === "error"
+                    ? "text-red-400"
+                    : "text-[var(--text-muted)]"
+              }`}
+              title={marginInspector.trace?.reason || marginInspector.message}
+            >
+              {marginInspector.phase === "querying"
+                ? "Margin: scanning..."
+                : `Margin: ${marginInspector.message}`}
+            </span>
+
             {/* Focus mode toggle */}
             <button
               onClick={() => setFocusMode(!focusMode)}
@@ -696,6 +713,7 @@ export default function JournalPage() {
                 onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
                 onApplyPreset={applyMarginPreset}
                 onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
+                inspector={marginInspector}
               />
             )}
           </div>
