@@ -38,8 +38,16 @@ export interface MarginTrace {
     }>;
   };
   llm?: {
-    parsed: number;
+    rawCandidates: number;
     accepted: number;
+    failureMode:
+      | "accepted"
+      | "model_empty"
+      | "no_json"
+      | "json_parse_error"
+      | "filtered_text"
+      | "filtered_type"
+      | "filtered_confidence";
     minModelConfidence: number;
   };
   timingsMs: {

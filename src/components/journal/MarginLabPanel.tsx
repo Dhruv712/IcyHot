@@ -122,7 +122,7 @@ export default function MarginLabPanel({
             {inspector.trace.llm && (
               <div className="text-[var(--text-muted)]">
                 LLM: accepted {inspector.trace.llm.accepted}/
-                {inspector.trace.llm.parsed} · min conf {inspector.trace.llm.minModelConfidence}
+                {inspector.trace.llm.rawCandidates} · mode {inspector.trace.llm.failureMode} · min conf {inspector.trace.llm.minModelConfidence}
               </div>
             )}
             <div className="text-[var(--text-muted)]">

@@ -126,8 +126,16 @@ interface MarginTrace {
     }>;
   };
   llm?: {
-    parsed: number;
+    rawCandidates: number;
     accepted: number;
+    failureMode:
+      | "accepted"
+      | "model_empty"
+      | "no_json"
+      | "json_parse_error"
+      | "filtered_text"
+      | "filtered_type"
+      | "filtered_confidence";
     minModelConfidence: number;
   };
   timingsMs: {
@@ -137,15 +145,34 @@ interface MarginTrace {
   };
 }
 
+type ParseFailureMode =
+  | "accepted"
+  | "model_empty"
+  | "no_json"
+  | "json_parse_error"
+  | "filtered_text"
+  | "filtered_type"
+  | "filtered_confidence";
+
 function parseAnnotations(
   text: string,
   paragraphIndex: number,
   minModelConfidence: number,
-): { annotations: ParsedAnnotation[]; parsed: number; accepted: number } {
+): {
+  annotations: ParsedAnnotation[];
+  rawCandidates: number;
+  accepted: number;
+  failureMode: ParseFailureMode;
+} {
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return { annotations: [], parsed: 0, accepted: 0 };
+      return {
+        annotations: [],
+        rawCandidates: 0,
+        accepted: 0,
+        failureMode: "no_json",
+      };
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as {
@@ -158,18 +185,59 @@ function parseAnnotations(
       }>;
     };
 
-    const parsedCount = Array.isArray(parsed.annotations)
+    const rawCandidates = Array.isArray(parsed.annotations)
       ? parsed.annotations.length
       : 0;
+    const raw = parsed.annotations || [];
 
-    const annotations = (parsed.annotations || [])
-      .filter((a) => a.text && a.text.length > 8 && a.text.length < 220)
-      .filter((a) => a.type === "ghost_question" || a.type === "tension")
-      .filter(
-        (a) =>
-          typeof a.confidence === "number" &&
-          a.confidence >= minModelConfidence,
-      )
+    if (rawCandidates === 0) {
+      return {
+        annotations: [],
+        rawCandidates,
+        accepted: 0,
+        failureMode: "model_empty",
+      };
+    }
+
+    const textFiltered = raw.filter(
+      (a) => a.text && a.text.length > 8 && a.text.length < 220,
+    );
+    if (textFiltered.length === 0) {
+      return {
+        annotations: [],
+        rawCandidates,
+        accepted: 0,
+        failureMode: "filtered_text",
+      };
+    }
+
+    const typeFiltered = textFiltered.filter(
+      (a) => a.type === "ghost_question" || a.type === "tension",
+    );
+    if (typeFiltered.length === 0) {
+      return {
+        annotations: [],
+        rawCandidates,
+        accepted: 0,
+        failureMode: "filtered_type",
+      };
+    }
+
+    const confidenceFiltered = typeFiltered.filter(
+      (a) =>
+        typeof a.confidence === "number" &&
+        a.confidence >= minModelConfidence,
+    );
+    if (confidenceFiltered.length === 0) {
+      return {
+        annotations: [],
+        rawCandidates,
+        accepted: 0,
+        failureMode: "filtered_confidence",
+      };
+    }
+
+    const annotations = confidenceFiltered
       .slice(0, 1) // Hard cap: 1 annotation per paragraph
       .map((a) => ({
         id: `${annotationFingerprint(
@@ -185,10 +253,20 @@ function parseAnnotations(
         memorySnippet: a.memorySnippet,
       }));
 
-    return { annotations, parsed: parsedCount, accepted: annotations.length };
+    return {
+      annotations,
+      rawCandidates,
+      accepted: annotations.length,
+      failureMode: "accepted",
+    };
   } catch {
     console.error("[margin] Failed to parse annotations:", text.slice(0, 200));
-    return { annotations: [], parsed: 0, accepted: 0 };
+    return {
+      annotations: [],
+      rawCandidates: 0,
+      accepted: 0,
+      failureMode: "json_parse_error",
+    };
   }
 }
 
@@ -351,15 +429,22 @@ export async function POST(request: NextRequest) {
       paragraphIndex ?? 0,
       server.minModelConfidence,
     );
+    const reasonByFailureMode: Record<ParseFailureMode, string> = {
+      accepted: "Annotation accepted.",
+      model_empty: "Model intentionally returned no annotation.",
+      no_json: "Model response had no JSON block.",
+      json_parse_error: "Model returned malformed JSON.",
+      filtered_text: "Model candidates failed text-format filters.",
+      filtered_type: "Model candidates had unsupported annotation types.",
+      filtered_confidence: "Model candidates were below confidence threshold.",
+    };
     const trace: MarginTrace = {
-      reason:
-        parsed.annotations.length > 0
-          ? "Annotation accepted."
-          : "Model returned no annotation above confidence/format thresholds.",
+      reason: reasonByFailureMode[parsed.failureMode],
       retrieval: retrievalTrace,
       llm: {
-        parsed: parsed.parsed,
+        rawCandidates: parsed.rawCandidates,
         accepted: parsed.accepted,
+        failureMode: parsed.failureMode,
         minModelConfidence: server.minModelConfidence,
       },
       timingsMs: {
