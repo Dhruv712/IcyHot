@@ -1,6 +1,11 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import {
+  coerceMarginTuning,
+  DEFAULT_MARGIN_TUNING,
+  type MarginTuningSettings,
+} from "@/lib/marginTuning";
 
 export interface MarginAnnotation {
   id: string;
@@ -15,14 +20,6 @@ interface MarginResponse {
   annotations: MarginAnnotation[];
   paragraphHash: string;
 }
-
-const DEBOUNCE_MS = 3_500;
-const MIN_PARAGRAPH_LENGTH = 30;
-const MIN_PARAGRAPH_WORDS = 8;
-const MIN_QUERY_GAP_MS = 7_000;
-const ANNOTATION_COOLDOWN_MS = 20_000;
-const MAX_ANNOTATIONS_PER_ENTRY = 8;
-const MIN_PARAGRAPH_GAP = 0;
 
 function simpleHash(text: string): string {
   let h = 0;
@@ -44,10 +41,18 @@ function annotationSignature(annotation: MarginAnnotation): string {
 export function useMarginIntelligence({
   entryDate,
   enabled,
+  tuning,
 }: {
   entryDate: string;
   enabled: boolean;
+  tuning?: MarginTuningSettings;
 }) {
+  const resolvedTuning = useMemo(
+    () => coerceMarginTuning(tuning ?? DEFAULT_MARGIN_TUNING),
+    [tuning],
+  );
+  const tuningKey = useMemo(() => JSON.stringify(resolvedTuning), [resolvedTuning]);
+
   const [annotations, setAnnotations] = useState<MarginAnnotation[]>([]);
   const dismissedRef = useRef(new Set<string>());
   const shownRef = useRef(new Set<string>());
@@ -74,16 +79,42 @@ export function useMarginIntelligence({
     lastAnnotatedParagraphRef.current = -Infinity;
   }, [entryDate]);
 
+  // Allow re-querying the same paragraph after tuning changes.
+  useEffect(() => {
+    queriedHashesRef.current.clear();
+    lastQueryAtRef.current = 0;
+  }, [tuningKey]);
+
   const triggerQuery = useCallback(
     async (
       paragraphText: string,
       fullEntry: string,
       paragraphIndex: number,
     ) => {
-      if (annotationCountRef.current >= MAX_ANNOTATIONS_PER_ENTRY) return;
-      if (Math.abs(paragraphIndex - lastAnnotatedParagraphRef.current) <= MIN_PARAGRAPH_GAP) return;
-      if (Date.now() - lastAnnotatedAtRef.current < ANNOTATION_COOLDOWN_MS) return;
-      if (Date.now() - lastQueryAtRef.current < MIN_QUERY_GAP_MS) return;
+      if (
+        annotationCountRef.current >=
+        resolvedTuning.client.maxAnnotationsPerEntry
+      ) {
+        return;
+      }
+      if (
+        Math.abs(paragraphIndex - lastAnnotatedParagraphRef.current) <=
+        resolvedTuning.client.minParagraphGap
+      ) {
+        return;
+      }
+      if (
+        Date.now() - lastAnnotatedAtRef.current <
+        resolvedTuning.client.annotationCooldownMs
+      ) {
+        return;
+      }
+      if (
+        Date.now() - lastQueryAtRef.current <
+        resolvedTuning.client.minQueryGapMs
+      ) {
+        return;
+      }
 
       const hash = simpleHash(paragraphText.trim());
       if (queriedHashesRef.current.has(hash)) return;
@@ -104,6 +135,7 @@ export function useMarginIntelligence({
             fullEntry,
             entryDate,
             paragraphIndex,
+            tuning: resolvedTuning,
           }),
           signal: controller.signal,
         });
@@ -139,23 +171,23 @@ export function useMarginIntelligence({
         console.error("[margin] Query failed:", e);
       }
     },
-    [entryDate],
+    [entryDate, resolvedTuning],
   );
 
   const handleParagraphChange = useCallback(
     (paragraph: { index: number; text: string }, fullMarkdown: string) => {
       if (!enabled) return;
       const text = paragraph.text.trim();
-      if (text.length < MIN_PARAGRAPH_LENGTH) return;
+      if (text.length < resolvedTuning.client.minParagraphLength) return;
       const wordCount = text.split(/\s+/).filter(Boolean).length;
-      if (wordCount < MIN_PARAGRAPH_WORDS) return;
+      if (wordCount < resolvedTuning.client.minParagraphWords) return;
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         triggerQuery(text, fullMarkdown, paragraph.index);
-      }, DEBOUNCE_MS);
+      }, resolvedTuning.client.debounceMs);
     },
-    [enabled, triggerQuery],
+    [enabled, triggerQuery, resolvedTuning.client],
   );
 
   const dismissAnnotation = useCallback((id: string) => {

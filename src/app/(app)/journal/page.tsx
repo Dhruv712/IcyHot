@@ -12,8 +12,15 @@ import dynamic from "next/dynamic";
 import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
 import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
+import MarginLabPanel from "@/components/journal/MarginLabPanel";
 import { useGravityWell } from "@/hooks/useGravityWell";
 import GravityWellMap from "@/components/journal/GravityWellMap";
+import {
+  coerceMarginTuning,
+  DEFAULT_MARGIN_TUNING,
+  MARGIN_TUNING_STORAGE_KEY,
+  type MarginTuningSettings,
+} from "@/lib/marginTuning";
 
 const MarkdownEditor = dynamic(
   () => import("@/components/journal/MarkdownEditor"),
@@ -33,9 +40,19 @@ export default function JournalPage() {
   );
   const [showEntries, setShowEntries] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarMode, setSidebarMode] = useState<"entries" | "map">("entries");
+  const [sidebarMode, setSidebarMode] = useState<"entries" | "map" | "lab">("entries");
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
+  const [marginTuning, setMarginTuning] = useState<MarginTuningSettings>(() => {
+    if (typeof window === "undefined") return DEFAULT_MARGIN_TUNING;
+    try {
+      const raw = localStorage.getItem(MARGIN_TUNING_STORAGE_KEY);
+      if (!raw) return DEFAULT_MARGIN_TUNING;
+      return coerceMarginTuning(JSON.parse(raw));
+    } catch {
+      return DEFAULT_MARGIN_TUNING;
+    }
+  });
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const entryDate = selectedDate ?? todayStr;
@@ -47,7 +64,11 @@ export default function JournalPage() {
     annotations: marginAnnotations,
     handleParagraphChange: handleMarginParagraph,
     dismissAnnotation,
-  } = useMarginIntelligence({ entryDate, enabled: !isLoading });
+  } = useMarginIntelligence({
+    entryDate,
+    enabled: !isLoading,
+    tuning: marginTuning,
+  });
 
   const {
     clusters,
@@ -61,16 +82,107 @@ export default function JournalPage() {
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const [editorElement, setEditorElement] = useState<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sidebarContentRef = useRef<HTMLDivElement>(null);
   const [sidebarSize, setSidebarSize] = useState({ width: 240, height: 400 });
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mouseIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const doSaveRef = useRef<() => void>(() => {});
   const isDirtyRef = useRef(false);
   const isSavingRef = useRef(false);
   const entryDateRef = useRef(entryDate);
   const focusModeRef = useRef(focusMode);
+
+  const setEditorContainer = useCallback((el: HTMLDivElement | null) => {
+    editorContainerRef.current = el;
+    setEditorElement(el);
+  }, []);
+
+  // Persist margin tuning locally
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        MARGIN_TUNING_STORAGE_KEY,
+        JSON.stringify(marginTuning),
+      );
+    } catch (error) {
+      console.warn("[margin-lab] Failed to persist tuning:", error);
+    }
+  }, [marginTuning]);
+
+  const applyMarginPreset = useCallback(
+    (preset: "subtle" | "balanced" | "generous") => {
+      const promptAddendum = marginTuning.promptAddendum;
+      const promptOverride = marginTuning.promptOverride;
+
+      if (preset === "subtle") {
+        setMarginTuning(
+          coerceMarginTuning({
+            ...DEFAULT_MARGIN_TUNING,
+            client: {
+              ...DEFAULT_MARGIN_TUNING.client,
+              debounceMs: 5000,
+              minQueryGapMs: 12000,
+              annotationCooldownMs: 50000,
+              maxAnnotationsPerEntry: 4,
+              minParagraphLength: 40,
+              minParagraphWords: 10,
+            },
+            server: {
+              ...DEFAULT_MARGIN_TUNING.server,
+              minActivationScore: 0.12,
+              minTopActivation: 0.14,
+              minTopGap: 0.03,
+              strongTopOverride: 0.22,
+              minModelConfidence: 0.8,
+            },
+            promptAddendum,
+            promptOverride,
+          }),
+        );
+        return;
+      }
+
+      if (preset === "generous") {
+        setMarginTuning(
+          coerceMarginTuning({
+            ...DEFAULT_MARGIN_TUNING,
+            client: {
+              ...DEFAULT_MARGIN_TUNING.client,
+              debounceMs: 2200,
+              minQueryGapMs: 3500,
+              annotationCooldownMs: 9000,
+              maxAnnotationsPerEntry: 14,
+              minParagraphLength: 20,
+              minParagraphWords: 5,
+            },
+            server: {
+              ...DEFAULT_MARGIN_TUNING.server,
+              minActivationScore: 0.07,
+              minTopActivation: 0.08,
+              minTopGap: 0.008,
+              strongTopOverride: 0.14,
+              minModelConfidence: 0.64,
+              maxMemoriesContext: 6,
+              maxImplicationsContext: 3,
+            },
+            promptAddendum,
+            promptOverride,
+          }),
+        );
+        return;
+      }
+
+      setMarginTuning({
+        ...DEFAULT_MARGIN_TUNING,
+        promptAddendum,
+        promptOverride,
+      });
+    },
+    [marginTuning.promptAddendum, marginTuning.promptOverride],
+  );
 
   // Keep refs in sync
   useEffect(() => {
@@ -195,16 +307,20 @@ export default function JournalPage() {
           isSavingRef.current = false;
           setSaveStatus("error");
           setTimeout(() => {
-            if (isDirtyRef.current) doSave();
+            if (isDirtyRef.current) doSaveRef.current();
           }, 5000);
         },
       }
     );
   }, [saveMutation, queryClient, todayStr]);
 
+  useEffect(() => {
+    doSaveRef.current = doSave;
+  }, [doSave]);
+
   // ── Schedule autosave on change ─────────────────────────────────────
   const handleEditorChange = useCallback(
-    (_markdown: string) => {
+    () => {
       isDirtyRef.current = true;
       setSaveStatus("idle");
 
@@ -404,7 +520,7 @@ export default function JournalPage() {
         {/* Editor area */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           <div
-            ref={editorContainerRef}
+            ref={setEditorContainer}
             className="relative max-w-[680px] mx-auto px-6 pb-24 md:px-8"
           >
             <MarkdownEditor
@@ -417,7 +533,7 @@ export default function JournalPage() {
             />
             <MarginAnnotations
               annotations={marginAnnotations}
-              editorElement={editorContainerRef.current}
+              editorElement={editorElement}
               onDismiss={dismissAnnotation}
             />
           </div>
@@ -456,6 +572,17 @@ export default function JournalPage() {
                   }`}
                 >
                   Map
+                </button>
+                <span className="text-[var(--text-muted)]">/</span>
+                <button
+                  onClick={() => setSidebarMode("lab")}
+                  className={`transition-colors ${
+                    sidebarMode === "lab"
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  Lab
                 </button>
               </div>
               {sidebarMode === "entries" && (
@@ -552,7 +679,7 @@ export default function JournalPage() {
                   </div>
                 )}
               </div>
-            ) : (
+            ) : sidebarMode === "map" ? (
               <div className="h-full flex items-center justify-center p-2">
                 <GravityWellMap
                   clusters={clusters}
@@ -563,6 +690,13 @@ export default function JournalPage() {
                   height={sidebarSize.height - 16}
                 />
               </div>
+            ) : (
+              <MarginLabPanel
+                value={marginTuning}
+                onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
+                onApplyPreset={applyMarginPreset}
+                onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
+              />
             )}
           </div>
         )}

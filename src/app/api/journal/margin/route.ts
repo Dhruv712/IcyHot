@@ -3,16 +3,9 @@ import { auth } from "@/auth";
 import { retrieveMemories } from "@/lib/memory/retrieve";
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "crypto";
+import { coerceMarginTuning, DEFAULT_MARGIN_TUNING } from "@/lib/marginTuning";
 
 export const maxDuration = 15;
-
-// Retrieval thresholds — tuned for more frequent annotations while preserving quality.
-const MIN_PARAGRAPH_WORDS = 6;
-const MIN_ACTIVATION_SCORE = 0.09;
-const MIN_TOP_ACTIVATION = 0.11;
-const MIN_TOP_GAP = 0.015;
-const STRONG_TOP_OVERRIDE = 0.17;
-const MIN_MODEL_CONFIDENCE = 0.72;
 
 function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
@@ -39,9 +32,24 @@ function buildMarginPrompt(
   entryDate: string,
   memoriesContext: string,
   implicationsContext: string,
+  promptAddendum: string,
+  promptOverride: string,
 ): string {
   const entryTruncated =
     fullEntry.length > 1500 ? fullEntry.slice(0, 1500) + "..." : fullEntry;
+
+  if (promptOverride.trim()) {
+    return promptOverride
+      .replaceAll("{{entryDate}}", entryDate)
+      .replaceAll("{{entry}}", entryTruncated)
+      .replaceAll("{{paragraph}}", paragraph)
+      .replaceAll("{{memories}}", memoriesContext || "(none)")
+      .replaceAll("{{implications}}", implicationsContext || "(none)");
+  }
+
+  const addendum = promptAddendum.trim()
+    ? `\nEXTRA DIRECTIVE FROM USER:\n${promptAddendum.trim()}\n`
+    : "";
 
   return `You are a margin annotator for a personal journal. You have access to their past memories. Your job: produce 0 or 1 margin annotations.
 
@@ -85,6 +93,8 @@ STRICT RULES:
 - Never annotate unless you'd bet money a thoughtful friend would notice the same thing.
 - When in doubt, return empty. Empty is always better than forced.
 
+${addendum}
+
 JSON only:
 {"annotations": [{"type": "ghost_question" | "tension", "text": "...", "memoryDate": "YYYY-MM-DD", "memorySnippet": "...", "confidence": 0.0}]}
 
@@ -103,6 +113,7 @@ interface ParsedAnnotation {
 function parseAnnotations(
   text: string,
   paragraphIndex: number,
+  minModelConfidence: number,
 ): ParsedAnnotation[] {
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -124,7 +135,7 @@ function parseAnnotations(
       .filter(
         (a) =>
           typeof a.confidence === "number" &&
-          a.confidence >= MIN_MODEL_CONFIDENCE,
+          a.confidence >= minModelConfidence,
       )
       .slice(0, 1) // Hard cap: 1 annotation per paragraph
       .map((a) => ({
@@ -152,8 +163,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { paragraph, fullEntry, entryDate, paragraphIndex } =
+  const { paragraph, fullEntry, entryDate, paragraphIndex, tuning } =
     await request.json();
+  const resolvedTuning = coerceMarginTuning(
+    tuning ?? DEFAULT_MARGIN_TUNING,
+  );
+  const server = resolvedTuning.server;
 
   if (
     !paragraph ||
@@ -165,7 +180,7 @@ export async function POST(request: NextRequest) {
 
   const trimmedParagraph = paragraph.trim();
   const wordCount = trimmedParagraph.split(/\s+/).filter(Boolean).length;
-  if (wordCount < MIN_PARAGRAPH_WORDS) {
+  if (wordCount < server.minParagraphWords) {
     return NextResponse.json({ annotations: [], paragraphHash: "" });
   }
 
@@ -189,17 +204,17 @@ export async function POST(request: NextRequest) {
 
     // 2. Filter to strongly relevant memories only — weak matches cause forced annotations
     const strongMemories = retrieval.memories.filter(
-      (m) => m.activationScore >= MIN_ACTIVATION_SCORE,
+      (m) => m.activationScore >= server.minActivationScore,
     );
     const topScore = retrieval.memories[0]?.activationScore ?? 0;
     const secondScore = retrieval.memories[1]?.activationScore ?? 0;
     const hasClearSignal =
-      topScore >= STRONG_TOP_OVERRIDE ||
-      (topScore >= MIN_TOP_ACTIVATION &&
-        (topScore - secondScore >= MIN_TOP_GAP || strongMemories.length >= 2));
+      topScore >= server.strongTopOverride ||
+      (topScore >= server.minTopActivation &&
+        (topScore - secondScore >= server.minTopGap || strongMemories.length >= 2));
 
     console.log(
-      `[margin] Retrieved ${retrieval.memories.length} memories, ${strongMemories.length} above threshold (${MIN_ACTIVATION_SCORE}). Top scores:`,
+      `[margin] Retrieved ${retrieval.memories.length} memories, ${strongMemories.length} above threshold (${server.minActivationScore}). Top scores:`,
       retrieval.memories.slice(0, 4).map((m) => ({
         score: m.activationScore.toFixed(3),
         hop: m.hop,
@@ -217,12 +232,12 @@ export async function POST(request: NextRequest) {
 
     // 3. Build context — only pass strong memories (max 4, not 6)
     const memoriesContext = strongMemories
-      .slice(0, 4)
+      .slice(0, server.maxMemoriesContext)
       .map((m) => `[${m.sourceDate}] ${m.content}`)
       .join("\n");
 
     const implicationsContext = retrieval.implications
-      .slice(0, 2)
+      .slice(0, server.maxImplicationsContext)
       .map((i) => `- ${i.content}`)
       .join("\n");
 
@@ -240,6 +255,8 @@ export async function POST(request: NextRequest) {
             entryDate || new Date().toISOString().slice(0, 10),
             memoriesContext,
             implicationsContext,
+            resolvedTuning.promptAddendum,
+            resolvedTuning.promptOverride,
           ),
         },
       ],
@@ -250,7 +267,11 @@ export async function POST(request: NextRequest) {
       response.content[0].type === "text"
         ? response.content[0].text.trim()
         : "";
-    const annotations = parseAnnotations(text, paragraphIndex ?? 0);
+    const annotations = parseAnnotations(
+      text,
+      paragraphIndex ?? 0,
+      server.minModelConfidence,
+    );
 
     return NextResponse.json({ annotations, paragraphHash });
   } catch (error) {
