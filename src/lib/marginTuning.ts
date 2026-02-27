@@ -32,7 +32,7 @@ export interface MarginTuningSettings {
 export const MARGIN_TUNING_STORAGE_KEY = "icyhot-margin-tuning-v1";
 
 export const DEFAULT_MARGIN_CLIENT_TUNING: MarginClientTuning = {
-  debounceMs: 3500,
+  debounceMs: 3000,
   minParagraphLength: 30,
   minParagraphWords: 8,
   minQueryGapMs: 7000,

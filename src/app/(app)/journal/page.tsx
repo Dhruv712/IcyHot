@@ -130,7 +130,7 @@ export default function JournalPage() {
             ...DEFAULT_MARGIN_TUNING,
             client: {
               ...DEFAULT_MARGIN_TUNING.client,
-              debounceMs: 5000,
+              debounceMs: 3000,
               minQueryGapMs: 12000,
               annotationCooldownMs: 50000,
               maxAnnotationsPerEntry: 4,
