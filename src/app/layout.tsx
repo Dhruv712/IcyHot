@@ -23,7 +23,9 @@ export const metadata: Metadata = {
     title: "Lumos",
   },
   icons: {
+    shortcut: "/favicon.ico",
     icon: [
+      { url: "/favicon.ico", sizes: "any" },
       { url: "/icon-192.png", sizes: "192x192" },
       { url: "/icon-512.png", sizes: "512x512" },
     ],
