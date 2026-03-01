@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useJournalEntry,
@@ -14,14 +14,14 @@ import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
 import SparkCards from "@/components/journal/SparkCards";
 import MarginLabPanel from "@/components/journal/MarginLabPanel";
-import { useGravityWell } from "@/hooks/useGravityWell";
-import GravityWellMap from "@/components/journal/GravityWellMap";
+import JournalWaveformTimeline from "@/components/journal/JournalWaveformTimeline";
 import {
   coerceMarginTuning,
   DEFAULT_MARGIN_TUNING,
   MARGIN_TUNING_STORAGE_KEY,
   type MarginTuningSettings,
 } from "@/lib/marginTuning";
+import { buildJournalWaveformEntries } from "@/lib/journalWaveform";
 
 const MarkdownEditor = dynamic(
   () => import("@/components/journal/MarkdownEditor"),
@@ -46,9 +46,8 @@ export default function JournalPage() {
   const [selectedDate, setSelectedDate] = useState<string | undefined>(
     undefined
   );
-  const [showEntries, setShowEntries] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarMode, setSidebarMode] = useState<"entries" | "map" | "lab">("entries");
+  const [showLabMobile, setShowLabMobile] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
   const [marginTuning, setMarginTuning] = useState<MarginTuningSettings>(() => {
@@ -84,22 +83,12 @@ export default function JournalPage() {
     tuning: marginTuning,
   });
 
-  const {
-    clusters,
-    memoryDots,
-    currentPosition,
-    trail,
-    handleParagraphChange: handleGravityParagraph,
-  } = useGravityWell({ entryDate, enabled: !isLoading });
-
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [editorElement, setEditorElement] = useState<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sidebarContentRef = useRef<HTMLDivElement>(null);
-  const [sidebarSize, setSidebarSize] = useState({ width: 240, height: 400 });
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mouseIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -210,7 +199,6 @@ export default function JournalPage() {
   }, [entryDate]);
   useEffect(() => {
     focusModeRef.current = focusMode;
-    if (!focusMode) setChromeHidden(false);
   }, [focusMode]);
 
   // Sync focus state to body so CSS can hide the left nav sidebar too
@@ -321,7 +309,7 @@ export default function JournalPage() {
         },
       }
     );
-  }, [saveMutation, queryClient, todayStr]);
+  }, [saveMutation, queryClient]);
 
   useEffect(() => {
     doSaveRef.current = doSave;
@@ -346,24 +334,9 @@ export default function JournalPage() {
     (p: { index: number; text: string }) => {
       const fullMd = editorRef.current?.getMarkdown() ?? "";
       handleMarginParagraph(p, fullMd);
-      handleGravityParagraph(p);
     },
-    [handleMarginParagraph, handleGravityParagraph]
+    [handleMarginParagraph]
   );
-
-  // ── Measure sidebar content area for GravityWellMap ───────────────
-  useEffect(() => {
-    const el = sidebarContentRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      setSidebarSize({
-        width: Math.round(entry.contentRect.width),
-        height: Math.round(entry.contentRect.height),
-      });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   // ── Cmd+S force-save ────────────────────────────────────────────────
   useEffect(() => {
@@ -410,27 +383,15 @@ export default function JournalPage() {
       setSelectedDate(date === todayStr ? undefined : date);
       isDirtyRef.current = false;
       setSaveStatus("idle");
-      setShowEntries(false);
+      setShowLabMobile(false);
     },
     [todayStr, doSave]
   );
 
-  // Group entries by month
-  const entriesByMonth = new Map<
-    string,
-    NonNullable<typeof entriesData>["entries"]
-  >();
-  const entries = entriesData?.entries ?? [];
-  for (const e of entries) {
-    const d = new Date(e.date + "T12:00:00");
-    const key = d.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-    });
-    const existing = entriesByMonth.get(key) ?? [];
-    existing.push(e);
-    entriesByMonth.set(key, existing);
-  }
+  const waveformEntries = useMemo(
+    () => buildJournalWaveformEntries(entriesData?.entries ?? [], entryDate),
+    [entriesData?.entries, entryDate]
+  );
 
   if (isLoading) {
     return (
@@ -451,10 +412,10 @@ export default function JournalPage() {
           }`}
         >
           <div className="flex items-center gap-3">
-            {/* Mobile entries toggle */}
             <button
-              onClick={() => setShowEntries(!showEntries)}
+              onClick={() => setShowLabMobile((value) => !value)}
               className="md:hidden text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+              title="Open Lab"
             >
               <svg
                 className="w-5 h-5"
@@ -507,9 +468,22 @@ export default function JournalPage() {
                 : `Margin: ${marginInspector.message}`}
             </span>
 
+            <button
+              onClick={() => setSidebarOpen((value) => !value)}
+              className="hidden md:inline-flex text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+              title={sidebarOpen ? "Close Lab" : "Open Lab"}
+            >
+              Lab
+            </button>
+
             {/* Focus mode toggle */}
             <button
-              onClick={() => setFocusMode(!focusMode)}
+              onClick={() => {
+                if (focusMode) {
+                  setChromeHidden(false);
+                }
+                setFocusMode(!focusMode);
+              }}
               className={`transition-colors ${
                 focusMode
                   ? "text-[var(--amber)] hover:text-[var(--amber-hover)]"
@@ -573,68 +547,39 @@ export default function JournalPage() {
             )}
           </div>
         </div>
+
+        <div
+          className={`flex-shrink-0 px-5 pb-4 md:px-8 transition-opacity duration-500 ${
+            chromeHidden ? "opacity-20" : "opacity-100"
+          }`}
+        >
+          <JournalWaveformTimeline
+            key={entryDate}
+            entries={waveformEntries}
+            activeEntryId={entryDate}
+            onSelectEntry={(selected) => handleSelectEntry(selected.date)}
+          />
+        </div>
       </div>
 
-      {/* ── Entries Sidebar (RIGHT, with collapse chevron) ──────── */}
       <aside
         className={`hidden md:flex h-full flex-shrink-0 bg-[var(--bg-card)] border-l border-[var(--border-subtle)] transition-all duration-200 flex-col ${
-          sidebarOpen ? "w-[240px]" : "w-[44px]"
-        } ${chromeHidden ? (sidebarMode === "map" ? "opacity-40" : "opacity-0 pointer-events-none") : "opacity-100"}`}
+          sidebarOpen ? "w-[320px]" : "w-[44px]"
+        } ${chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"}`}
         style={{ transition: "width 200ms, opacity 500ms" }}
       >
-        {/* Sidebar header with mode toggle + collapse chevron */}
         <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--border-subtle)]">
           {sidebarOpen && (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide">
-                <button
-                  onClick={() => setSidebarMode("entries")}
-                  className={`transition-colors ${
-                    sidebarMode === "entries"
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  Entries
-                </button>
-                <span className="text-[var(--text-muted)]">/</span>
-                <button
-                  onClick={() => setSidebarMode("map")}
-                  className={`transition-colors ${
-                    sidebarMode === "map"
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  Map
-                </button>
-                <span className="text-[var(--text-muted)]">/</span>
-                <button
-                  onClick={() => setSidebarMode("lab")}
-                  className={`transition-colors ${
-                    sidebarMode === "lab"
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  Lab
-                </button>
-              </div>
-              {sidebarMode === "entries" && (
-                <button
-                  onClick={() => handleSelectEntry(todayStr)}
-                  className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors ml-auto"
-                  title="Go to today"
-                >
-                  Today
-                </button>
-              )}
+              <span className="text-xs font-medium uppercase tracking-[0.22em] text-[var(--text-muted)]">
+                Lab
+              </span>
             </div>
           )}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors p-1"
-            title={sidebarOpen ? "Collapse entries" : "Expand entries"}
+            title={sidebarOpen ? "Collapse lab" : "Expand lab"}
           >
             <svg
               className="w-4 h-4"
@@ -660,72 +605,39 @@ export default function JournalPage() {
           </button>
         </div>
 
-        {/* Sidebar content (hidden when collapsed) */}
         {sidebarOpen && (
-          <div ref={sidebarContentRef} className="flex-1 overflow-hidden">
-            {sidebarMode === "entries" ? (
-              <div className="h-full overflow-y-auto py-2">
-                {Array.from(entriesByMonth.entries()).map(
-                  ([month, monthEntries]) => (
-                    <div key={month}>
-                      <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
-                        {month}
-                      </div>
-                      {monthEntries!.map((e) => {
-                        const isActive =
-                          selectedDate === e.date ||
-                          (!selectedDate && e.date === todayStr);
-                        const d = new Date(e.date + "T12:00:00");
-                        const day = d.getDate();
-                        const weekday = d.toLocaleDateString("en-US", {
-                          weekday: "short",
-                        });
+          <div className="flex-1 overflow-hidden">
+            <MarginLabPanel
+              value={marginTuning}
+              onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
+              onApplyPreset={applyMarginPreset}
+              onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
+              inspector={marginInspector}
+              sparkSummary={sparkSummary}
+            />
+          </div>
+        )}
+      </aside>
 
-                        return (
-                          <button
-                            key={e.date}
-                            onClick={() => handleSelectEntry(e.date)}
-                            className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
-                              isActive
-                                ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
-                                : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                            }`}
-                          >
-                            <span
-                              className={`text-lg font-light w-7 text-right ${
-                                isActive
-                                  ? "text-[var(--amber)]"
-                                  : "text-[var(--text-muted)]"
-                              }`}
-                            >
-                              {day}
-                            </span>
-                            <span className="text-xs">{weekday}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )
-                )}
-
-                {entries.length === 0 && (
-                  <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
-                    No entries yet
-                  </div>
-                )}
-              </div>
-            ) : sidebarMode === "map" ? (
-              <div className="h-full flex items-center justify-center p-2">
-                <GravityWellMap
-                  clusters={clusters}
-                  memoryDots={memoryDots}
-                  currentPosition={currentPosition}
-                  trail={trail}
-                  width={sidebarSize.width - 16}
-                  height={sidebarSize.height - 16}
-                />
-              </div>
-            ) : (
+      {showLabMobile && (
+        <>
+          <div
+            className="fixed inset-0 z-10 bg-black/30 md:hidden"
+            onClick={() => setShowLabMobile(false)}
+          />
+          <aside className="fixed right-0 z-20 h-full w-[320px] max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border-subtle)] flex flex-col md:hidden animate-slide-in-right">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
+              <span className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
+                Lab
+              </span>
+              <button
+                onClick={() => setShowLabMobile(false)}
+                className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors uppercase tracking-[0.18em]"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
               <MarginLabPanel
                 value={marginTuning}
                 onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
@@ -734,72 +646,6 @@ export default function JournalPage() {
                 inspector={marginInspector}
                 sparkSummary={sparkSummary}
               />
-            )}
-          </div>
-        )}
-      </aside>
-
-      {/* ── Mobile entries sidebar (slides from right) ─────────── */}
-      {showEntries && (
-        <>
-          <div
-            className="fixed inset-0 z-10 bg-black/30 md:hidden"
-            onClick={() => setShowEntries(false)}
-          />
-          <aside className="fixed right-0 z-20 h-full w-[260px] bg-[var(--bg-card)] border-l border-[var(--border-subtle)] flex flex-col md:hidden animate-slide-in-right">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
-              <span className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
-                Entries
-              </span>
-              <button
-                onClick={() => handleSelectEntry(todayStr)}
-                className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors"
-              >
-                Today
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto py-2">
-              {Array.from(entriesByMonth.entries()).map(
-                ([month, monthEntries]) => (
-                  <div key={month}>
-                    <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
-                      {month}
-                    </div>
-                    {monthEntries!.map((e) => {
-                      const isActive =
-                        selectedDate === e.date ||
-                        (!selectedDate && e.date === todayStr);
-                      const d = new Date(e.date + "T12:00:00");
-                      const day = d.getDate();
-                      const weekday = d.toLocaleDateString("en-US", {
-                        weekday: "short",
-                      });
-                      return (
-                        <button
-                          key={e.date}
-                          onClick={() => handleSelectEntry(e.date)}
-                          className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
-                            isActive
-                              ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
-                              : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                          }`}
-                        >
-                          <span
-                            className={`text-lg font-light w-7 text-right ${
-                              isActive
-                                ? "text-[var(--amber)]"
-                                : "text-[var(--text-muted)]"
-                            }`}
-                          >
-                            {day}
-                          </span>
-                          <span className="text-xs">{weekday}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )
-              )}
             </div>
           </aside>
         </>
