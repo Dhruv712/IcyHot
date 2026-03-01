@@ -63,8 +63,8 @@ function ModeToggle({
         }`}
       >
         <span
-          className={`absolute top-[2px] h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? "translate-x-3.5" : "translate-x-0.5"
+          className={`absolute left-[2px] top-[2px] h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? "translate-x-3.5" : "translate-x-0"
           }`}
         />
       </span>
@@ -530,6 +530,11 @@ export default function JournalPage() {
     </div>
   );
 
+  const compactMarginNotes = sidebarOpen && !chromeHidden;
+  const editorLayoutClass = compactMarginNotes
+    ? "relative max-w-[600px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-14"
+    : "relative max-w-[760px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-16";
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center bg-[var(--bg-base)]">
@@ -638,7 +643,7 @@ export default function JournalPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           <div
             ref={setEditorContainer}
-            className="relative max-w-[620px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-16"
+            className={editorLayoutClass}
           >
             <MarkdownEditor
               ref={editorRef}
@@ -653,6 +658,7 @@ export default function JournalPage() {
               <SparkCards
                 nudges={sparkNudges}
                 editorElement={editorElement}
+                compactMode={compactMarginNotes}
                 onDismiss={dismissNudge}
                 onExpand={expandNudge}
                 onFeedback={submitNudgeFeedback}

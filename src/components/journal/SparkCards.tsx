@@ -10,6 +10,7 @@ const CARD_GAP = 10;
 interface SparkCardsProps {
   nudges: SparkNudgeCard[];
   editorElement: HTMLElement | null;
+  compactMode?: boolean;
   onDismiss: (id: string) => void;
   onExpand: (id: string) => void;
   onFeedback: (
@@ -46,6 +47,7 @@ function shortDate(value?: string): string {
 export default function SparkCards({
   nudges,
   editorElement,
+  compactMode = false,
   onDismiss,
   onExpand,
   onFeedback,
@@ -53,6 +55,7 @@ export default function SparkCards({
   const [resolvedPositions, setResolvedPositions] = useState<Map<string, number>>(new Map());
   const [revisitId, setRevisitId] = useState<string | null>(null);
   const [reasonOpenForId, setReasonOpenForId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const recalcRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
 
@@ -75,14 +78,19 @@ export default function SparkCards({
 
     for (const { nudge, naturalTop } of sorted) {
       const cardEl = cardRefs.current.get(nudge.id);
-      const cardHeight = cardEl ? cardEl.offsetHeight : nudge.collapsed ? 78 : 210;
+      const isPreviewOnly = compactMode && hoveredId !== nudge.id;
+      const cardHeight = cardEl
+        ? cardEl.offsetHeight
+        : isPreviewOnly || nudge.collapsed
+          ? 18
+          : 210;
       const resolvedTop = Math.max(naturalTop, prevBottom + CARD_GAP);
       newPositions.set(nudge.id, resolvedTop);
-      prevBottom = resolvedTop + cardHeight;
+      prevBottom = resolvedTop + (isPreviewOnly ? 12 : cardHeight);
     }
 
     setResolvedPositions(newPositions);
-  }, [editorElement, nudges]);
+  }, [compactMode, editorElement, hoveredId, nudges]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
@@ -117,8 +125,26 @@ export default function SparkCards({
         if (top === undefined) return null;
 
         const showReasonPicker = reasonOpenForId === nudge.id;
+        const showCompactPreview = compactMode && hoveredId !== nudge.id;
+        const isExpanded = !nudge.collapsed || (compactMode && hoveredId === nudge.id);
 
-        if (nudge.collapsed) {
+        if (showCompactPreview) {
+          return (
+            <div
+              key={nudge.id}
+              ref={(el) => {
+                if (el) cardRefs.current.set(nudge.id, el);
+                else cardRefs.current.delete(nudge.id);
+              }}
+              className={`spark-dot spark-dot--${nudge.type}`}
+              style={{ top }}
+              onMouseEnter={() => setHoveredId(nudge.id)}
+              onMouseLeave={() => setHoveredId((current) => (current === nudge.id ? null : current))}
+            />
+          );
+        }
+
+        if (nudge.collapsed && !isExpanded) {
           return (
             <button
               key={nudge.id}
@@ -129,6 +155,10 @@ export default function SparkCards({
               className={`spark-chip spark-chip--${nudge.type}`}
               style={{ top }}
               onClick={() => onExpand(nudge.id)}
+              onMouseEnter={() => compactMode && setHoveredId(nudge.id)}
+              onMouseLeave={() =>
+                compactMode && setHoveredId((current) => (current === nudge.id ? null : current))
+              }
               title="Open comment"
             >
               <span className="spark-chip__rail" />
@@ -152,11 +182,21 @@ export default function SparkCards({
             }}
             className={`spark-card spark-card--${nudge.type}`}
             style={{ top }}
+            onMouseEnter={() => compactMode && setHoveredId(nudge.id)}
+            onMouseLeave={() =>
+              compactMode && setHoveredId((current) => (current === nudge.id ? null : current))
+            }
           >
             <button
               className="spark-card__collapse"
-              onClick={() => onExpand(nudge.id)}
-              aria-label="Collapse comment"
+              onClick={() => {
+                if (compactMode) {
+                  setHoveredId(null);
+                  return;
+                }
+                onExpand(nudge.id);
+              }}
+              aria-label={compactMode ? "Hide comment" : "Collapse comment"}
             >
               −
             </button>
