@@ -3,22 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import HealthScore from "./HealthScore";
-import NotificationToggle from "./NotificationToggle";
 import { useJournalSidebar } from "./JournalSidebarContext";
-import { useTheme } from "./ThemeProvider";
 
 interface SidebarProps {
-  healthScore: number;
-  contactCount: number;
   driftingCount: number;
   onAddPerson: () => void;
-  onSyncCalendar: () => void;
-  onSyncJournal: () => void;
-  calendarConnected: boolean;
-  journalConfigured: boolean;
-  calendarSyncing: boolean;
-  journalSyncing: boolean;
 }
 
 const NAV_ITEMS = [
@@ -97,20 +86,11 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar({
-  healthScore,
-  contactCount,
   driftingCount,
   onAddPerson,
-  onSyncCalendar,
-  onSyncJournal,
-  calendarConnected,
-  journalConfigured,
-  calendarSyncing,
-  journalSyncing,
 }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const { resolved, setTheme } = useTheme();
   const { content: journalSidebarContent } = useJournalSidebar();
   const showJournalRail = pathname === "/journal" && !collapsed && journalSidebarContent;
 
@@ -197,7 +177,7 @@ export default function Sidebar({
         </div>
 
         {/* Actions */}
-        <div className="px-2 py-3 border-t border-[var(--border-subtle)] space-y-1">
+        <div className="px-2 py-3 border-t border-[var(--border-subtle)]">
           {/* Add Person */}
           <button
             onClick={onAddPerson}
@@ -211,62 +191,6 @@ export default function Sidebar({
             </svg>
             {!collapsed && <span className="text-sm font-medium">Add Person</span>}
           </button>
-
-          {/* Calendar Sync */}
-          {calendarConnected && (
-            <button
-              onClick={onSyncCalendar}
-              disabled={calendarSyncing}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors w-full disabled:opacity-50 ${
-                collapsed ? "justify-center" : ""
-              }`}
-              title={collapsed ? "Sync Calendar" : undefined}
-            >
-              <span className={`text-base flex-shrink-0 ${calendarSyncing ? "animate-spin" : ""}`}>🔄</span>
-              {!collapsed && <span className="text-sm">Calendar</span>}
-            </button>
-          )}
-
-          {/* Journal Sync */}
-          {journalConfigured && (
-            <button
-              onClick={onSyncJournal}
-              disabled={journalSyncing}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors w-full disabled:opacity-50 ${
-                collapsed ? "justify-center" : ""
-              }`}
-              title={collapsed ? "Sync Journal" : undefined}
-            >
-              <span className={`text-base flex-shrink-0 ${journalSyncing ? "animate-spin" : ""}`}>📓</span>
-              {!collapsed && <span className="text-sm">Journal</span>}
-            </button>
-          )}
-
-          {/* Notifications */}
-          <NotificationToggle collapsed={collapsed} />
-
-          {/* Theme Toggle */}
-          <button
-            onClick={() => setTheme(resolved === "dark" ? "light" : "dark")}
-            className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors w-full ${
-              collapsed ? "justify-center" : ""
-            }`}
-            title={collapsed ? `Switch to ${resolved === "dark" ? "light" : "dark"} mode` : undefined}
-          >
-            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              {resolved === "dark" ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-              )}
-            </svg>
-            {!collapsed && <span className="text-sm">{resolved === "dark" ? "Light mode" : "Dark mode"}</span>}
-          </button>
-        </div>
-
-        {/* Health Score */}
-        <div className={`px-4 py-3 border-t border-[var(--border-subtle)] ${collapsed ? "px-2 flex justify-center" : ""}`}>
-          <HealthScore score={healthScore} contactCount={contactCount} compact={collapsed} />
         </div>
       </aside>
 

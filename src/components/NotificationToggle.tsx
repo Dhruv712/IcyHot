@@ -25,9 +25,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 interface NotificationToggleProps {
   collapsed?: boolean;
+  compact?: boolean;
 }
 
-export default function NotificationToggle({ collapsed = false }: NotificationToggleProps) {
+export default function NotificationToggle({
+  collapsed = false,
+  compact = false,
+}: NotificationToggleProps) {
   const [supported, setSupported] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -146,6 +150,24 @@ export default function NotificationToggle({ collapsed = false }: NotificationTo
   }, [loading, enabled]);
 
   if (!supported) return null;
+
+  if (compact) {
+    return (
+      <button
+        onClick={toggle}
+        disabled={loading}
+        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+          enabled
+            ? "border-[var(--amber)] bg-[var(--amber-ghost-bg)] text-[var(--amber)] hover:border-[var(--amber-hover)]"
+            : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text-secondary)]"
+        }`}
+        title={error || (enabled ? "Notifications on" : "Notifications off")}
+        aria-label={enabled ? "Disable notifications" : "Enable notifications"}
+      >
+        <span className="text-base">{enabled ? "\uD83D\uDD14" : "\uD83D\uDD15"}</span>
+      </button>
+    );
+  }
 
   return (
     <div>

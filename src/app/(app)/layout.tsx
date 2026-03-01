@@ -1,24 +1,19 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Sidebar from "@/components/Sidebar";
 import AddContactDialog from "@/components/AddContactDialog";
 import JournalSidebarProvider from "@/components/JournalSidebarContext";
 import { useGraphData } from "@/hooks/useGraphData";
-import { useCalendarStatus, useCalendarSync } from "@/hooks/useCalendar";
-import { useJournalStatus, useJournalSync } from "@/hooks/useJournal";
+import NotificationToggle from "@/components/NotificationToggle";
+import { useTheme } from "@/components/ThemeProvider";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const { data: graphData } = useGraphData();
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
-
-  const { data: calendarStatus } = useCalendarStatus();
-  const calendarSync = useCalendarSync();
-  const { data: journalStatus } = useJournalStatus();
-  const journalSync = useJournalSync();
+  const { resolved, setTheme } = useTheme();
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -44,53 +39,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         // Non-blocking best-effort sync
       });
   }, [session?.user?.id]);
-
-  const handleSyncCalendar = useCallback(() => {
-    setSyncMessage("Syncing calendar...");
-    calendarSync.mutate(undefined, {
-      onSuccess: (result) => {
-        const parts = [];
-        if (result.matched > 0) parts.push(`${result.matched} matched`);
-        if (result.created > 0) parts.push(`${result.created} auto-logged`);
-        if (result.unmatched > 0) parts.push(`${result.unmatched} unmatched`);
-        if (parts.length > 0) {
-          setSyncMessage(`Calendar synced: ${parts.join(", ")}`);
-        } else {
-          setSyncMessage("Calendar up to date");
-        }
-        setTimeout(() => setSyncMessage(null), 5000);
-      },
-      onError: () => {
-        setSyncMessage("Calendar sync failed");
-        setTimeout(() => setSyncMessage(null), 3000);
-      },
-    });
-  }, [calendarSync]);
-
-  const handleSyncJournal = useCallback(() => {
-    setSyncMessage("Syncing journal...");
-    journalSync.mutate(undefined, {
-      onSuccess: (result) => {
-        if (result.processed === 0) {
-          setSyncMessage("Journal up to date");
-        } else {
-          const parts = [];
-          if (result.interactions > 0) parts.push(`${result.interactions} interactions`);
-          if (result.openLoops > 0) parts.push(`${result.openLoops} open loops`);
-          if (result.newPeople > 0) parts.push(`${result.newPeople} new people`);
-          if (result.insights > 0) parts.push(`${result.insights} insights`);
-          setSyncMessage(
-            `Journal: ${result.processed} entr${result.processed === 1 ? "y" : "ies"} — ${parts.join(", ")}`
-          );
-        }
-        setTimeout(() => setSyncMessage(null), 6000);
-      },
-      onError: (error) => {
-        setSyncMessage(`Journal sync failed: ${error.message}`);
-        setTimeout(() => setSyncMessage(null), 4000);
-      },
-    });
-  }, [journalSync]);
 
   // Loading state
   if (status === "loading") {
@@ -134,28 +82,32 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <JournalSidebarProvider>
       <div className="h-screen w-screen flex flex-col md:flex-row overflow-hidden">
         <Sidebar
-          healthScore={graphData?.healthScore ?? 0}
-          contactCount={contactNodes.length}
           driftingCount={driftingCount}
           onAddPerson={() => setShowAddDialog(true)}
-          onSyncCalendar={handleSyncCalendar}
-          onSyncJournal={handleSyncJournal}
-          calendarConnected={!!calendarStatus?.connected}
-          journalConfigured={!!journalStatus?.configured}
-          calendarSyncing={calendarSync.isPending}
-          journalSyncing={journalSync.isPending}
         />
 
         {/* Main content area */}
         <main className="flex-1 relative overflow-hidden pb-16 md:pb-0">
-          {/* Sync toast */}
-          {syncMessage && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
-              <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-4 py-2.5 text-sm text-[var(--text-secondary)] shadow-lg backdrop-blur-sm">
-                {syncMessage}
-              </div>
+          <div className="pointer-events-none absolute right-4 top-4 z-40 flex items-center gap-2">
+            <div className="pointer-events-auto">
+              <NotificationToggle compact />
             </div>
-          )}
+            <button
+              type="button"
+              onClick={() => setTheme(resolved === "dark" ? "light" : "dark")}
+              className="pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text-secondary)]"
+              title={`Switch to ${resolved === "dark" ? "light" : "dark"} mode`}
+              aria-label={`Switch to ${resolved === "dark" ? "light" : "dark"} mode`}
+            >
+              <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                {resolved === "dark" ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                )}
+              </svg>
+            </button>
+          </div>
 
           {children}
         </main>
