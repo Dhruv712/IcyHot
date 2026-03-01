@@ -23,8 +23,6 @@ type ZoomLevel = "life" | "season" | "week";
 type SamplePoint = {
   ts: number;
   intensity: number;
-  valence: number;
-  clarity: number;
   entry?: JournalWaveformEntry;
 };
 
@@ -47,9 +45,9 @@ const WINDOW_DAYS: Record<Exclude<ZoomLevel, "life">, number> = {
   week: 10,
 };
 const HEIGHT_BY_ZOOM: Record<ZoomLevel, number> = {
-  life: 138,
-  season: 162,
-  week: 224,
+  life: 128,
+  season: 148,
+  week: 214,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -67,25 +65,15 @@ function formatDate(dateStr: string, includeYear = false): string {
   });
 }
 
-function colorForEmotion(valence: number, clarity: number, intensity: number): string {
-  const confidence = clamp(clarity, 0, 1);
-
-  if (valence >= 0.1) {
-    const warm = interpolateHcl("#9e8c5d", "#ffbf57")(clamp(0.35 + valence * 0.55 + intensity * 0.18, 0, 1));
-    return interpolateHcl("#63666f", warm)(0.25 + confidence * 0.75);
-  }
-
-  if (valence <= -0.1) {
-    const coolBase = interpolateHcl("#5b6fa7", "#7a70a7")(clamp((1 - confidence) * 0.85, 0, 1));
-    const heated = interpolateHcl(coolBase, "#dd6b3f")(clamp(intensity * 0.85, 0, 1));
-    return interpolateHcl("#646771", heated)(0.22 + confidence * 0.78);
-  }
-
-  const neutral = interpolateHcl("#5d6966", "#88858d")(1 - confidence * 0.8);
-  return interpolateHcl("#666871", neutral)(0.3 + confidence * 0.5);
+function amberForIntensity(intensity: number): { color: string; opacity: number } {
+  const color = interpolateHcl("#7a5920", "#ffcf73")(clamp(intensity, 0, 1));
+  return {
+    color,
+    opacity: 0.3 + clamp(intensity, 0, 1) * 0.65,
+  };
 }
 
-function buildAugmentedSamples(entries: JournalWaveformEntry[]): {
+function buildSamples(entries: JournalWaveformEntry[], zoomLevel: ZoomLevel): {
   samples: SamplePoint[];
   gaps: GapSegment[];
 } {
@@ -93,62 +81,61 @@ function buildAugmentedSamples(entries: JournalWaveformEntry[]): {
     return { samples: [], gaps: [] };
   }
 
-  const samples: SamplePoint[] = [];
+  const raw: SamplePoint[] = [];
   const gaps: GapSegment[] = [];
 
-  for (let i = 0; i < entries.length; i += 1) {
-    const entry = entries[i];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
     const ts = new Date(`${entry.date}T12:00:00`).getTime();
-    samples.push({
-      ts,
-      intensity: entry.intensity,
-      valence: entry.valence,
-      clarity: entry.clarity,
-      entry,
-    });
+    raw.push({ ts, intensity: entry.intensity, entry });
 
-    const next = entries[i + 1];
+    const next = entries[index + 1];
     if (!next) continue;
 
     const nextTs = new Date(`${next.date}T12:00:00`).getTime();
     const gapDays = Math.round((nextTs - ts) / DAY_MS);
     if (gapDays >= 3) {
-      const taper = Math.min(DAY_MS * 1.5, (nextTs - ts) / 2 - DAY_MS * 0.2);
+      const taper = Math.min(DAY_MS * 1.8, (nextTs - ts) * 0.28);
       const startTs = ts + taper;
       const endTs = nextTs - taper;
-
-      samples.push({
-        ts: startTs,
-        intensity: 0,
-        valence: entry.valence * 0.3,
-        clarity: entry.clarity * 0.5,
-      });
-      samples.push({
-        ts: endTs,
-        intensity: 0,
-        valence: next.valence * 0.3,
-        clarity: next.clarity * 0.5,
-      });
+      raw.push({ ts: startTs, intensity: 0 });
+      raw.push({ ts: endTs, intensity: 0 });
       gaps.push({ startTs, endTs, days: gapDays });
     }
   }
 
-  samples.sort((a, b) => a.ts - b.ts);
-  return { samples, gaps };
+  raw.sort((a, b) => a.ts - b.ts);
+
+  const radius = zoomLevel === "life" ? 6 : zoomLevel === "season" ? 4 : 2;
+  const smoothed = raw.map((sample, index) => {
+    let totalWeight = 0;
+    let total = 0;
+
+    for (let offset = -radius; offset <= radius; offset += 1) {
+      const neighbor = raw[index + offset];
+      if (!neighbor) continue;
+      const weight = radius + 1 - Math.abs(offset);
+      total += neighbor.intensity * weight;
+      totalWeight += weight;
+    }
+
+    return {
+      ...sample,
+      intensity: totalWeight > 0 ? total / totalWeight : sample.intensity,
+    } satisfies SamplePoint;
+  });
+
+  return { samples: smoothed, gaps };
 }
 
 function getWindowSpan(zoomLevel: ZoomLevel, fullSpan: number): number {
-  if (zoomLevel === "life") {
-    return Math.max(fullSpan, DAY_MS * 45);
-  }
+  if (zoomLevel === "life") return Math.max(fullSpan, DAY_MS * 45);
   return WINDOW_DAYS[zoomLevel] * DAY_MS;
 }
 
 function clampCenter(centerTs: number, minTs: number, maxTs: number, span: number): number {
   const half = span / 2;
-  if (maxTs - minTs <= span) {
-    return (minTs + maxTs) / 2;
-  }
+  if (maxTs - minTs <= span) return (minTs + maxTs) / 2;
   return clamp(centerTs, minTs + half, maxTs - half);
 }
 
@@ -157,10 +144,10 @@ function findNearestEntry(entries: Array<JournalWaveformEntry & { ts: number }>,
   let best = entries[0];
   let bestDistance = Math.abs(entries[0].ts - targetTs);
 
-  for (let i = 1; i < entries.length; i += 1) {
-    const distance = Math.abs(entries[i].ts - targetTs);
+  for (let index = 1; index < entries.length; index += 1) {
+    const distance = Math.abs(entries[index].ts - targetTs);
     if (distance < bestDistance) {
-      best = entries[i];
+      best = entries[index];
       bestDistance = distance;
     }
   }
@@ -169,8 +156,7 @@ function findNearestEntry(entries: Array<JournalWaveformEntry & { ts: number }>,
 }
 
 function shiftZoom(current: ZoomLevel, direction: -1 | 1): ZoomLevel {
-  const nextIndex = clamp(ZOOM_ORDER.indexOf(current) + direction, 0, ZOOM_ORDER.length - 1);
-  return ZOOM_ORDER[nextIndex];
+  return ZOOM_ORDER[clamp(ZOOM_ORDER.indexOf(current) + direction, 0, ZOOM_ORDER.length - 1)];
 }
 
 export default function JournalWaveformTimeline({
@@ -180,8 +166,6 @@ export default function JournalWaveformTimeline({
 }: JournalWaveformTimelineProps) {
   const gradientId = useId();
   const clipId = useId();
-  const textureId = useId();
-  const glowId = useId();
   const outerRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<{
     pointerId: number;
@@ -210,10 +194,11 @@ export default function JournalWaveformTimeline({
   const [viewportWidth, setViewportWidth] = useState(0);
   const [scrubState, setScrubState] = useState<{
     entry: (JournalWaveformEntry & { ts: number }) | null;
+    gap: GapSegment | null;
     x: number;
     y: number;
     visible: boolean;
-  }>({ entry: null, x: 0, y: 0, visible: false });
+  }>({ entry: null, gap: null, x: 0, y: 0, visible: false });
 
   useEffect(() => {
     const node = outerRef.current;
@@ -221,19 +206,12 @@ export default function JournalWaveformTimeline({
 
     const observer = new ResizeObserver((records) => {
       const nextWidth = Math.round(records[0]?.contentRect.width ?? 0);
-      if (nextWidth > 0) {
-        setViewportWidth(nextWidth);
-      }
+      if (nextWidth > 0) setViewportWidth(nextWidth);
     });
 
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
-
-  const { samples, gaps } = useMemo(
-    () => buildAugmentedSamples(orderedEntries),
-    [orderedEntries],
-  );
 
   const minTs = entriesWithTs[0]?.ts ?? fallbackNow;
   const maxTs = entriesWithTs[entriesWithTs.length - 1]?.ts ?? minTs + DAY_MS;
@@ -245,91 +223,97 @@ export default function JournalWaveformTimeline({
   const domainStart = zoomLevel === "life" ? fullDomainStart : clampedCenter - requestedSpan / 2;
   const domainEnd = zoomLevel === "life" ? fullDomainEnd : clampedCenter + requestedSpan / 2;
 
+  const { samples, gaps } = useMemo(
+    () => buildSamples(orderedEntries, zoomLevel),
+    [orderedEntries, zoomLevel],
+  );
+
   const visibleEntries = useMemo(
     () => entriesWithTs.filter((entry) => entry.ts >= domainStart - DAY_MS * 2 && entry.ts <= domainEnd + DAY_MS * 2),
     [domainEnd, domainStart, entriesWithTs],
   );
+  const visibleGaps = useMemo(
+    () => gaps.filter((gap) => gap.endTs >= domainStart && gap.startTs <= domainEnd),
+    [domainEnd, domainStart, gaps],
+  );
 
-  const plotWidth = Math.max(240, viewportWidth - 40);
-  const frameHeight = collapsed ? 68 : HEIGHT_BY_ZOOM[zoomLevel];
-  const labelBandHeight = !collapsed && zoomLevel === "week" ? 86 : 0;
-  const waveformHeight = frameHeight - 54 - labelBandHeight;
-  const centerY = 18 + waveformHeight / 2;
-  const amplitude = waveformHeight * 0.36;
+  const plotWidth = Math.max(260, viewportWidth - 44);
+  const frameHeight = collapsed ? 64 : HEIGHT_BY_ZOOM[zoomLevel];
+  const labelBandHeight = !collapsed && zoomLevel === "week" ? 88 : 0;
+  const chartTop = 18;
+  const waveformHeight = Math.max(24, frameHeight - 48 - labelBandHeight);
+  const baselineY = chartTop + waveformHeight;
+  const amplitude = waveformHeight * 0.78;
+
   const xScale = useMemo(
-    () => scaleLinear().domain([domainStart, domainEnd]).range([20, plotWidth + 20]),
+    () => scaleLinear().domain([domainStart, domainEnd]).range([22, plotWidth + 22]),
     [domainEnd, domainStart, plotWidth],
   );
 
   const areaPath = useMemo(() => {
     if (samples.length === 0) return "";
     const generator = area<SamplePoint>()
-      .x((d) => xScale(d.ts))
-      .y0((d) => centerY + d.intensity * amplitude)
-      .y1((d) => centerY - d.intensity * amplitude)
-      .curve(curveCatmullRom.alpha(0.5));
+      .x((sample) => xScale(sample.ts))
+      .y0(baselineY)
+      .y1((sample) => baselineY - sample.intensity * amplitude)
+      .curve(curveCatmullRom.alpha(0.18));
     return generator(samples) ?? "";
-  }, [amplitude, centerY, samples, xScale]);
+  }, [amplitude, baselineY, samples, xScale]);
 
-  const crestPath = useMemo(() => {
+  const ridgePath = useMemo(() => {
     if (samples.length === 0) return "";
     const generator = line<SamplePoint>()
-      .x((d) => xScale(d.ts))
-      .y((d) => centerY - d.intensity * amplitude)
-      .curve(curveCatmullRom.alpha(0.5));
+      .x((sample) => xScale(sample.ts))
+      .y((sample) => baselineY - sample.intensity * amplitude)
+      .curve(curveCatmullRom.alpha(0.18));
     return generator(samples) ?? "";
-  }, [amplitude, centerY, samples, xScale]);
-
-  const visibleGapSegments = useMemo(
-    () => gaps.filter((gap) => gap.endTs >= domainStart && gap.startTs <= domainEnd),
-    [domainEnd, domainStart, gaps],
-  );
+  }, [amplitude, baselineY, samples, xScale]);
 
   const gradientStops = useMemo(() => {
     if (visibleEntries.length === 0) {
-      return [
-        { offset: "0%", color: "#7d8a8a" },
-        { offset: "100%", color: "#7d8a8a" },
-      ];
+      const fallback = amberForIntensity(0.4);
+      return [{ offset: "0%", ...fallback }, { offset: "100%", ...fallback }];
     }
 
     const span = Math.max(1, domainEnd - domainStart);
-    return visibleEntries.map((entry) => ({
-      offset: `${clamp(((entry.ts - domainStart) / span) * 100, 0, 100)}%`,
-      color: colorForEmotion(entry.valence, entry.clarity, entry.intensity),
-    }));
+    return visibleEntries.map((entry) => {
+      const amber = amberForIntensity(entry.intensity);
+      return {
+        offset: `${clamp(((entry.ts - domainStart) / span) * 100, 0, 100)}%`,
+        ...amber,
+      };
+    });
   }, [domainEnd, domainStart, visibleEntries]);
-
-  const currentMarkerX = activeEntry ? xScale(activeEntry.ts) : null;
 
   const updateScrub = useCallback(
     (clientX: number, clientY: number, forceVisible = false) => {
-      if (!outerRef.current || visibleEntries.length === 0) return;
+      if (!outerRef.current) return;
       const bounds = outerRef.current.getBoundingClientRect();
-      const relativeX = clamp(clientX - bounds.left, 20, plotWidth + 20);
-      const targetTs = domainStart + ((relativeX - 20) / Math.max(1, plotWidth)) * (domainEnd - domainStart);
-      const nearest = findNearestEntry(visibleEntries, targetTs);
+      const relativeX = clamp(clientX - bounds.left, 22, plotWidth + 22);
+      const targetTs = domainStart + ((relativeX - 22) / Math.max(1, plotWidth)) * (domainEnd - domainStart);
+      const gap = visibleGaps.find((item) => targetTs >= item.startTs && targetTs <= item.endTs) ?? null;
+      const nearest = gap ? null : findNearestEntry(visibleEntries, targetTs);
 
       setScrubState({
         entry: nearest,
+        gap,
         x: relativeX,
-        y: clamp(clientY - bounds.top, 14, frameHeight - 18),
+        y: clamp(clientY - bounds.top, 12, baselineY),
         visible: forceVisible || zoomLevel !== "life",
       });
     },
-    [domainEnd, domainStart, frameHeight, plotWidth, visibleEntries, zoomLevel],
+    [baselineY, domainEnd, domainStart, plotWidth, visibleEntries, visibleGaps, zoomLevel],
   );
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      const target = event.currentTarget;
       dragStateRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
         startCenterTs: clampedCenter,
         moved: false,
       };
-      target.setPointerCapture(event.pointerId);
+      event.currentTarget.setPointerCapture(event.pointerId);
       updateScrub(event.clientX, event.clientY, true);
     },
     [clampedCenter, updateScrub],
@@ -346,14 +330,11 @@ export default function JournalWaveformTimeline({
       }
 
       const dx = event.clientX - drag.startX;
-      if (Math.abs(dx) > 4) {
-        drag.moved = true;
-      }
+      if (Math.abs(dx) > 4) drag.moved = true;
 
       if (zoomLevel !== "life" && drag.moved) {
-        const span = requestedSpan;
-        const nextCenter = drag.startCenterTs - (dx / Math.max(1, plotWidth)) * span;
-        setCenterTs(clampCenter(nextCenter, fullDomainStart, fullDomainEnd, span));
+        const nextCenter = drag.startCenterTs - (dx / Math.max(1, plotWidth)) * requestedSpan;
+        setCenterTs(clampCenter(nextCenter, fullDomainStart, fullDomainEnd, requestedSpan));
       }
 
       updateScrub(event.clientX, event.clientY, true);
@@ -366,24 +347,22 @@ export default function JournalWaveformTimeline({
       const drag = dragStateRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
 
-      if (!drag.moved) {
-        const bounds = outerRef.current?.getBoundingClientRect();
-        const relativeX = bounds
-          ? clamp(event.clientX - bounds.left, 20, plotWidth + 20)
-          : 20;
-        const targetTs = domainStart + ((relativeX - 20) / Math.max(1, plotWidth)) * (domainEnd - domainStart);
-        const nearest = findNearestEntry(visibleEntries, targetTs);
+      const bounds = outerRef.current?.getBoundingClientRect();
+      const relativeX = bounds
+        ? clamp(event.clientX - bounds.left, 22, plotWidth + 22)
+        : 22;
+      const targetTs = domainStart + ((relativeX - 22) / Math.max(1, plotWidth)) * (domainEnd - domainStart);
+      const nearest = findNearestEntry(visibleEntries, targetTs);
 
+      if (!drag.moved) {
         if (zoomLevel === "life") {
           setCenterTs(targetTs);
           setZoomLevel("season");
         } else if (zoomLevel === "season") {
           setCenterTs(targetTs);
-          if (nearest) {
-            setZoomLevel("week");
-          }
-        } else if (zoomLevel === "week" && nearest && onSelectEntry) {
-          onSelectEntry(nearest);
+          setZoomLevel("week");
+        } else if (zoomLevel === "week" && nearest) {
+          onSelectEntry?.(nearest);
         }
       }
 
@@ -417,7 +396,7 @@ export default function JournalWaveformTimeline({
 
       const bounds = outerRef.current?.getBoundingClientRect();
       const pointerRatio = bounds
-        ? clamp((event.clientX - bounds.left - 20) / Math.max(1, plotWidth), 0, 1)
+        ? clamp((event.clientX - bounds.left - 22) / Math.max(1, plotWidth), 0, 1)
         : 0.5;
       const focusTs = domainStart + pointerRatio * (domainEnd - domainStart);
       const nextSpan = getWindowSpan(nextZoom, fullSpan);
@@ -439,16 +418,17 @@ export default function JournalWaveformTimeline({
     ],
   );
 
-  const weekLabels = !collapsed && zoomLevel === "week" ? visibleEntries.slice(-10) : [];
+  const weekEntries = !collapsed && zoomLevel === "week" ? visibleEntries.slice(-8) : [];
+  const baselineColor = "rgba(255, 209, 128, 0.14)";
 
   return (
     <div
       ref={outerRef}
-      className="relative overflow-hidden rounded-[28px] border border-white/8 bg-[#11161c] shadow-[0_20px_80px_rgba(0,0,0,0.35)] transition-[height,opacity] duration-400"
+      className="relative overflow-hidden rounded-[28px] border border-white/8 bg-[#12161b] shadow-[0_18px_60px_rgba(0,0,0,0.32)] transition-[height,opacity] duration-400"
       style={{
         height: frameHeight,
         backgroundImage:
-          "radial-gradient(circle at 20% 20%, rgba(242,184,88,0.12), transparent 35%), radial-gradient(circle at 82% 0%, rgba(92,123,219,0.18), transparent 34%), linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0))",
+          "radial-gradient(circle at 18% 12%, rgba(255,191,87,0.12), transparent 32%), linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0))",
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -456,11 +436,9 @@ export default function JournalWaveformTimeline({
       onPointerLeave={handlePointerLeave}
       onWheel={handleWheel}
     >
-      <div className="flex items-center justify-between px-4 pt-3 pb-1">
-        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.28em] text-white/45">
-          <span>Inner Weather</span>
-          <span className="text-white/20">/</span>
-          <span>{zoomLevel}</span>
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.26em] text-white/36">
+          Terrain
         </div>
 
         <div className="flex items-center gap-2">
@@ -473,8 +451,8 @@ export default function JournalWaveformTimeline({
                 onPointerDown={(event) => event.stopPropagation()}
                 className={`rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.22em] transition-all ${
                   zoomLevel === level
-                    ? "bg-white/12 text-white shadow-[0_0_24px_rgba(255,255,255,0.08)]"
-                    : "text-white/45 hover:text-white/72"
+                    ? "bg-[rgba(255,191,87,0.16)] text-[#ffd18a]"
+                    : "text-white/40 hover:text-white/68"
                 }`}
               >
                 {level}
@@ -486,7 +464,7 @@ export default function JournalWaveformTimeline({
             type="button"
             onClick={() => setCollapsed((value) => !value)}
             onPointerDown={(event) => event.stopPropagation()}
-            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-white/55 transition-colors hover:text-white"
+            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-white/50 transition-colors hover:text-white"
           >
             {collapsed ? "Open" : "Mini"}
           </button>
@@ -496,173 +474,84 @@ export default function JournalWaveformTimeline({
       <svg
         width="100%"
         height={frameHeight - 8}
-        viewBox={`0 0 ${plotWidth + 40} ${frameHeight - 8}`}
+        viewBox={`0 0 ${plotWidth + 44} ${frameHeight - 8}`}
         className="block"
         preserveAspectRatio="none"
       >
         <defs>
           <linearGradient id={gradientId} x1="0%" x2="100%" y1="0%" y2="0%">
             {gradientStops.map((stop, index) => (
-              <stop key={`${stop.offset}-${index}`} offset={stop.offset} stopColor={stop.color} />
+              <stop
+                key={`${stop.offset}-${index}`}
+                offset={stop.offset}
+                stopColor={stop.color}
+                stopOpacity={stop.opacity}
+              />
             ))}
           </linearGradient>
           <clipPath id={clipId}>
-            <rect x="0" y="0" width={plotWidth + 40} height={frameHeight - 8} rx="24" />
+            <rect x="0" y="0" width={plotWidth + 44} height={frameHeight - 8} rx="24" />
           </clipPath>
-          <pattern id={textureId} width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(28)">
-            <line x1="0" y1="0" x2="0" y2="12" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
-          </pattern>
-          <filter id={glowId} x="-20%" y="-40%" width="140%" height="180%">
-            <feGaussianBlur stdDeviation="10" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
         </defs>
 
         <g clipPath={`url(#${clipId})`}>
-          <rect x="0" y="0" width={plotWidth + 40} height={frameHeight - 8} fill="rgba(7,10,14,0.22)" />
+          <rect x="0" y="0" width={plotWidth + 44} height={frameHeight - 8} fill="rgba(7,10,14,0.18)" />
+          <line x1="22" x2={plotWidth + 22} y1={baselineY} y2={baselineY} stroke={baselineColor} strokeWidth="1" />
 
-          {visibleGapSegments.map((gap) => {
-            const x = xScale(gap.startTs);
-            const width = Math.max(0, xScale(gap.endTs) - x);
-            const labelX = x + width / 2;
-            return (
-              <g key={`${gap.startTs}-${gap.endTs}`}>
-                <rect x={x} y={16} width={width} height={waveformHeight + 12} fill="rgba(255,255,255,0.03)" />
-                <rect x={x} y={16} width={width} height={waveformHeight + 12} fill={`url(#${textureId})`} opacity={0.32} />
-                {gap.days >= 7 && !collapsed && (
-                  <text
-                    x={labelX}
-                    y={centerY + waveformHeight * 0.28}
-                    fill="rgba(255,255,255,0.3)"
-                    fontSize="10"
-                    fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-                    textAnchor="middle"
-                    letterSpacing="0.18em"
-                  >
-                    {gap.days} days
-                  </text>
-                )}
-              </g>
-            );
-          })}
-
-          <line x1="20" x2={plotWidth + 20} y1={centerY} y2={centerY} stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
-
-          {areaPath && (
-            <>
-              <path d={areaPath} fill={`url(#${gradientId})`} opacity={0.86} filter={`url(#${glowId})`} />
-              <path d={areaPath} fill="rgba(255,255,255,0.05)" opacity={0.24} />
-            </>
-          )}
-
-          {crestPath && (
+          {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} opacity={0.92} />}
+          {ridgePath && (
             <path
-              d={crestPath}
+              d={ridgePath}
               fill="none"
-              stroke="rgba(255,255,255,0.38)"
-              strokeWidth="1.2"
+              stroke="#f0ba63"
+              strokeOpacity="0.82"
+              strokeWidth="1.6"
               strokeLinejoin="round"
               strokeLinecap="round"
             />
           )}
 
-          {currentMarkerX !== null && (
-            <line
-              x1={currentMarkerX}
-              x2={currentMarkerX}
-              y1={12}
-              y2={waveformHeight + 22}
-              stroke="rgba(255,255,255,0.18)"
-              strokeDasharray="3 4"
-            />
-          )}
-
-          {!collapsed && zoomLevel !== "life" &&
+          {!collapsed && zoomLevel === "week" &&
             visibleEntries.map((entry) => {
               const x = xScale(entry.ts);
-              const topY = centerY - entry.intensity * amplitude;
-              const size = entry.isPivot ? 5.2 : 3.2;
-              const color = colorForEmotion(entry.valence, entry.clarity, entry.intensity);
+              const y = baselineY - entry.intensity * amplitude;
               return (
-                <g key={entry.id}>
-                  {entry.isPivot && (
-                    <line
-                      x1={x}
-                      x2={x}
-                      y1={topY - 16}
-                      y2={centerY + entry.intensity * amplitude + 18}
-                      stroke="rgba(255,255,255,0.16)"
-                      strokeWidth="1"
-                    />
-                  )}
-                  <circle
-                    cx={x}
-                    cy={topY}
-                    r={size}
-                    fill={color}
-                    stroke={entry.id === activeEntryId ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.24)"}
-                    strokeWidth={entry.id === activeEntryId ? 1.5 : 0.75}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (zoomLevel === "week") {
-                        onSelectEntry?.(entry);
-                      } else {
-                        setCenterTs(entry.ts);
-                        setZoomLevel(shiftZoom(zoomLevel, 1));
-                      }
-                    }}
-                    className="cursor-pointer transition-transform duration-200 hover:scale-110"
-                  />
-                </g>
+                <circle
+                  key={entry.id}
+                  cx={x}
+                  cy={y}
+                  r={2.35}
+                  fill="#f3c46f"
+                  fillOpacity={0.88}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectEntry?.(entry);
+                  }}
+                  className="cursor-pointer"
+                />
               );
             })}
-
-          <text
-            x="20"
-            y={frameHeight - 20}
-            fill="rgba(255,255,255,0.38)"
-            fontSize="10"
-            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-            letterSpacing="0.16em"
-          >
-            {formatDate(entriesWithTs[0]?.date ?? "", true)}
-          </text>
-          <text
-            x={plotWidth + 20}
-            y={frameHeight - 20}
-            fill="rgba(255,255,255,0.38)"
-            fontSize="10"
-            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-            letterSpacing="0.16em"
-            textAnchor="end"
-          >
-            {formatDate(entriesWithTs[entriesWithTs.length - 1]?.date ?? "", true)}
-          </text>
         </g>
       </svg>
 
-      {!collapsed && zoomLevel === "week" && weekLabels.length > 0 && (
+      {!collapsed && zoomLevel === "week" && weekEntries.length > 0 && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[88px] px-5">
-          {weekLabels.map((entry, index) => {
+          {weekEntries.map((entry, index) => {
             const x = xScale(entry.ts);
             const row = index % 2;
-            const top = 10 + row * 36;
+            const top = 10 + row * 38;
             return (
               <button
                 key={entry.id}
                 type="button"
                 onClick={() => onSelectEntry?.(entry)}
                 onPointerDown={(event) => event.stopPropagation()}
-                className="pointer-events-auto absolute w-[156px] -translate-x-1/2 rounded-2xl border border-white/8 bg-black/25 px-3 py-2 text-left shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-sm transition-transform duration-200 hover:-translate-y-0.5"
+                className="pointer-events-auto absolute w-[154px] -translate-x-1/2 rounded-2xl border border-white/8 bg-black/24 px-3 py-2 text-left shadow-[0_10px_28px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-transform duration-200 hover:-translate-y-0.5"
                 style={{ left: x, top }}
               >
-                <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-white/45">
-                  <span>{formatDate(entry.date)}</span>
-                  {entry.isPivot && <span className="rounded-full bg-white/8 px-1.5 py-0.5 text-[9px] text-[#ffbf57]">shift</span>}
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/40">
+                  {formatDate(entry.date)}
                 </div>
                 <div className="line-clamp-2 text-[11px] leading-relaxed text-white/78">{entry.distilled}</div>
               </button>
@@ -671,23 +560,31 @@ export default function JournalWaveformTimeline({
         </div>
       )}
 
-      {!collapsed && scrubState.visible && scrubState.entry && (
+      {!collapsed && scrubState.visible && (scrubState.entry || scrubState.gap) && (
         <div
-          className="pointer-events-none absolute z-10 w-[230px] -translate-x-1/2 rounded-2xl border border-white/10 bg-[#0c1015]/92 px-3 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur-md"
+          className="pointer-events-none absolute z-10 w-[220px] -translate-x-1/2 rounded-2xl border border-white/10 bg-[#0d1116]/94 px-3 py-3 shadow-[0_16px_38px_rgba(0,0,0,0.34)] backdrop-blur-md"
           style={{
-            left: clamp(scrubState.x, 124, plotWidth - 84),
-            top: Math.max(36, scrubState.y - 54),
+            left: clamp(scrubState.x, 118, plotWidth - 72),
+            top: Math.max(30, scrubState.y - 52),
           }}
         >
-          <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-white/48">
-            <span>{formatDate(scrubState.entry.date, true)}</span>
-            {scrubState.entry.isPivot && <span className="text-[#ffbf57]">pivot</span>}
-          </div>
-          <p className="text-xs leading-relaxed text-white/82">{scrubState.entry.distilled}</p>
-          <div className="mt-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-white/34">
-            <span>{Math.round(scrubState.entry.intensity * 100)} intensity</span>
-            <span>{scrubState.entry.wordCount} words</span>
-          </div>
+          {scrubState.gap ? (
+            <>
+              <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/44">
+                Quiet stretch
+              </div>
+              <p className="text-xs leading-relaxed text-white/78">
+                {scrubState.gap.days} days without an entry.
+              </p>
+            </>
+          ) : scrubState.entry ? (
+            <>
+              <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/44">
+                {formatDate(scrubState.entry.date, true)}
+              </div>
+              <p className="text-xs leading-relaxed text-white/82">{scrubState.entry.distilled}</p>
+            </>
+          ) : null}
         </div>
       )}
     </div>

@@ -7,6 +7,7 @@ import {
   useJournalEntries,
   useSaveJournalEntry,
   type JournalEntry,
+  type JournalEntryListItem,
 } from "@/hooks/useJournal";
 import dynamic from "next/dynamic";
 import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
@@ -46,8 +47,9 @@ export default function JournalPage() {
   const [selectedDate, setSelectedDate] = useState<string | undefined>(
     undefined
   );
-  const [showLabMobile, setShowLabMobile] = useState(false);
+  const [showSidebarMobile, setShowSidebarMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarMode, setSidebarMode] = useState<"entries" | "lab">("entries");
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
   const [marginTuning, setMarginTuning] = useState<MarginTuningSettings>(() => {
@@ -383,7 +385,7 @@ export default function JournalPage() {
       setSelectedDate(date === todayStr ? undefined : date);
       isDirtyRef.current = false;
       setSaveStatus("idle");
-      setShowLabMobile(false);
+      setShowSidebarMobile(false);
     },
     [todayStr, doSave]
   );
@@ -391,6 +393,77 @@ export default function JournalPage() {
   const waveformEntries = useMemo(
     () => buildJournalWaveformEntries(entriesData?.entries ?? [], entryDate),
     [entriesData?.entries, entryDate]
+  );
+  const entriesByMonth = useMemo<Array<{ month: string; entries: JournalEntryListItem[] }>>(
+    () => {
+      const groups = new Map<string, JournalEntryListItem[]>();
+      for (const entryItem of entriesData?.entries ?? []) {
+        const date = new Date(`${entryItem.date}T12:00:00`);
+        const month = date.toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+        });
+        const existing = groups.get(month) ?? [];
+        existing.push(entryItem);
+        groups.set(month, existing);
+      }
+      return Array.from(groups.entries()).map(([month, monthEntries]) => ({
+        month,
+        entries: monthEntries,
+      }));
+    },
+    [entriesData?.entries]
+  );
+
+  const renderEntriesList = () => (
+    <div className="h-full overflow-y-auto py-2">
+      {entriesByMonth.map(({ month, entries: monthEntries }) => (
+        <div key={month}>
+          <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+            {month}
+          </div>
+          {monthEntries.map((entryItem) => {
+            const isActive =
+              selectedDate === entryItem.date ||
+              (!selectedDate && entryItem.date === todayStr);
+            const date = new Date(`${entryItem.date}T12:00:00`);
+            const day = date.getDate();
+            const weekday = date.toLocaleDateString("en-US", {
+              weekday: "short",
+            });
+
+            return (
+              <button
+                key={entryItem.date}
+                onClick={() => handleSelectEntry(entryItem.date)}
+                className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
+                  isActive
+                    ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                <span
+                  className={`text-lg font-light w-7 text-right ${
+                    isActive
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)]"
+                  }`}
+                >
+                  {day}
+                </span>
+                <span className="text-xs">{weekday}</span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+
+      {entriesByMonth.length === 0 && (
+        <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
+          No entries yet
+        </div>
+      )}
+    </div>
   );
 
   if (isLoading) {
@@ -413,9 +486,9 @@ export default function JournalPage() {
         >
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setShowLabMobile((value) => !value)}
+              onClick={() => setShowSidebarMobile((value) => !value)}
               className="md:hidden text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-              title="Open Lab"
+              title="Open sidebar"
             >
               <svg
                 className="w-5 h-5"
@@ -469,7 +542,21 @@ export default function JournalPage() {
             </span>
 
             <button
-              onClick={() => setSidebarOpen((value) => !value)}
+              onClick={() => {
+                setSidebarMode("entries");
+                setSidebarOpen(true);
+              }}
+              className="hidden md:inline-flex text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+              title="Open entries"
+            >
+              Entries
+            </button>
+
+            <button
+              onClick={() => {
+                setSidebarMode("lab");
+                setSidebarOpen((value) => (sidebarOpen && sidebarMode === "lab" ? !value : true));
+              }}
               className="hidden md:inline-flex text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
               title={sidebarOpen ? "Close Lab" : "Open Lab"}
             >
@@ -571,9 +658,29 @@ export default function JournalPage() {
         <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--border-subtle)]">
           {sidebarOpen && (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <span className="text-xs font-medium uppercase tracking-[0.22em] text-[var(--text-muted)]">
-                Lab
-              </span>
+              <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide">
+                <button
+                  onClick={() => setSidebarMode("entries")}
+                  className={`transition-colors ${
+                    sidebarMode === "entries"
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  Entries
+                </button>
+                <span className="text-[var(--text-muted)]">/</span>
+                <button
+                  onClick={() => setSidebarMode("lab")}
+                  className={`transition-colors ${
+                    sidebarMode === "lab"
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  Lab
+                </button>
+              </div>
             </div>
           )}
           <button
@@ -607,37 +714,9 @@ export default function JournalPage() {
 
         {sidebarOpen && (
           <div className="flex-1 overflow-hidden">
-            <MarginLabPanel
-              value={marginTuning}
-              onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
-              onApplyPreset={applyMarginPreset}
-              onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
-              inspector={marginInspector}
-              sparkSummary={sparkSummary}
-            />
-          </div>
-        )}
-      </aside>
-
-      {showLabMobile && (
-        <>
-          <div
-            className="fixed inset-0 z-10 bg-black/30 md:hidden"
-            onClick={() => setShowLabMobile(false)}
-          />
-          <aside className="fixed right-0 z-20 h-full w-[320px] max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border-subtle)] flex flex-col md:hidden animate-slide-in-right">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
-              <span className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
-                Lab
-              </span>
-              <button
-                onClick={() => setShowLabMobile(false)}
-                className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors uppercase tracking-[0.18em]"
-              >
-                Close
-              </button>
-            </div>
-            <div className="flex-1 overflow-hidden">
+            {sidebarMode === "entries" ? (
+              renderEntriesList()
+            ) : (
               <MarginLabPanel
                 value={marginTuning}
                 onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
@@ -646,6 +725,62 @@ export default function JournalPage() {
                 inspector={marginInspector}
                 sparkSummary={sparkSummary}
               />
+            )}
+          </div>
+        )}
+      </aside>
+
+      {showSidebarMobile && (
+        <>
+          <div
+            className="fixed inset-0 z-10 bg-black/30 md:hidden"
+            onClick={() => setShowSidebarMobile(false)}
+          />
+          <aside className="fixed right-0 z-20 h-full w-[320px] max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border-subtle)] flex flex-col md:hidden animate-slide-in-right">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
+              <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide">
+                <button
+                  onClick={() => setSidebarMode("entries")}
+                  className={`transition-colors ${
+                    sidebarMode === "entries"
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  Entries
+                </button>
+                <span className="text-[var(--text-muted)]">/</span>
+                <button
+                  onClick={() => setSidebarMode("lab")}
+                  className={`transition-colors ${
+                    sidebarMode === "lab"
+                      ? "text-[var(--amber)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  Lab
+                </button>
+              </div>
+              <button
+                onClick={() => setShowSidebarMobile(false)}
+                className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors uppercase tracking-[0.18em]"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {sidebarMode === "entries" ? (
+                renderEntriesList()
+              ) : (
+                <MarginLabPanel
+                  value={marginTuning}
+                  onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
+                  onApplyPreset={applyMarginPreset}
+                  onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
+                  inspector={marginInspector}
+                  sparkSummary={sparkSummary}
+                />
+              )}
             </div>
           </aside>
         </>

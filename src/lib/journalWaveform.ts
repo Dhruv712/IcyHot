@@ -154,12 +154,6 @@ function buildDistilledSummary(
   return `You were on the way into a deeper chapter with ${subject}, and ${pivot}.`;
 }
 
-function daysBetween(a: string, b: string): number {
-  const aDate = new Date(`${a}T12:00:00`);
-  const bDate = new Date(`${b}T12:00:00`);
-  return Math.round((bDate.getTime() - aDate.getTime()) / 86_400_000);
-}
-
 export function buildJournalWaveformEntries(
   sourceEntries: JournalWaveformSourceEntry[],
   activeDate?: string,
@@ -171,23 +165,23 @@ export function buildJournalWaveformEntries(
   if (dates.length === 0) return [];
 
   const total = Math.max(1, dates.length - 1);
-  const rawEntries = dates.map((date, index) => {
+  return dates.map((date, index) => {
     const t = index / total;
     const arc = buildNarrativeArc(t);
-    const seasonal = Math.sin(t * Math.PI * 5 + hash01(`${date}:season`) * 2.4) * 0.14;
-    const jitter = (hash01(`${date}:jitter`) - 0.5) * 0.24;
-    const pressure = (hash01(`${date}:pressure`) - 0.5) * 0.18;
+    const longWave = Math.sin(t * Math.PI * 2.4 + hash01(`${date}:season`) * 1.4) * 0.07;
+    const jitter = (hash01(`${date}:jitter`) - 0.5) * 0.08;
+    const pressure = (hash01(`${date}:pressure`) - 0.5) * 0.09;
 
-    const valence = clamp(arc.valence + seasonal + jitter, -1, 1);
+    const valence = clamp(arc.valence + longWave + jitter, -1, 1);
     const intensity = clamp(
-      arc.intensity + Math.abs(seasonal) * 0.18 + pressure + (1 - Math.abs(valence)) * 0.06,
-      0.08,
-      1,
+      arc.intensity + Math.abs(longWave) * 0.08 + pressure + (1 - Math.abs(valence)) * 0.03,
+      0.12,
+      0.92,
     );
     const clarity = clamp(
-      arc.clarity + Math.abs(valence) * 0.16 - (0.5 - intensity) * 0.08 + (hash01(`${date}:clarity`) - 0.5) * 0.18,
-      0.1,
-      1,
+      arc.clarity + Math.abs(valence) * 0.12 - (0.5 - intensity) * 0.05 + (hash01(`${date}:clarity`) - 0.5) * 0.1,
+      0.18,
+      0.94,
     );
 
     return {
@@ -201,26 +195,4 @@ export function buildJournalWaveformEntries(
       wordCount: Math.round(220 + intensity * 880 + hash01(`${date}:words`) * 260),
     } satisfies JournalWaveformEntry;
   });
-
-  const pivotCandidates = rawEntries
-    .slice(1)
-    .map((entry, index) => {
-      const previous = rawEntries[index];
-      const deltaValence = Math.abs(entry.valence - previous.valence);
-      const deltaIntensity = Math.abs(entry.intensity - previous.intensity);
-      const deltaClarity = Math.abs(entry.clarity - previous.clarity);
-      const signFlip = Math.sign(entry.valence) !== Math.sign(previous.valence);
-      const gapScore = Math.min(0.35, Math.max(0, daysBetween(previous.date, entry.date) - 2) * 0.03);
-      const score = deltaValence * 1.8 + deltaIntensity * 1.3 + deltaClarity * 0.8 + (signFlip ? 0.45 : 0) + gapScore;
-      return { id: entry.id, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const pivotTarget = clamp(Math.round(rawEntries.length / 28), 5, 8);
-  const pivotIds = new Set(pivotCandidates.slice(0, pivotTarget).map((candidate) => candidate.id));
-
-  return rawEntries.map((entry) => ({
-    ...entry,
-    isPivot: pivotIds.has(entry.id),
-  }));
 }
