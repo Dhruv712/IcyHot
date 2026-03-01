@@ -12,6 +12,7 @@ import {
 } from "react";
 import { area, curveMonotoneX, line, scaleLinear } from "d3";
 import type { JournalWaveformEntry } from "@/lib/journalWaveform";
+import { useTheme } from "@/components/ThemeProvider";
 
 type ZoomLevel = "life" | "season" | "week";
 
@@ -215,6 +216,7 @@ export default function JournalWaveformTimeline({
   activeEntryId,
   onSelectEntry,
 }: JournalWaveformTimelineProps) {
+  const { resolved } = useTheme();
   const gradientId = useId();
   const outerRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<{
@@ -475,42 +477,114 @@ export default function JournalWaveformTimeline({
     : detailEntry
       ? describeEntry(detailEntry)
       : historySummary;
+  const palette = resolved === "light"
+    ? {
+        shellBg: "#fbfaf6",
+        shellBorder: "rgba(196,149,64,0.18)",
+        shellShadow: "0 10px 28px rgba(124, 94, 34, 0.08)",
+        topDivider: "rgba(196,149,64,0.12)",
+        chartBg: "#f7f3ea",
+        baseline: "rgba(196,149,64,0.18)",
+        scrubLine: "rgba(26,26,31,0.14)",
+        ridge: "#c49540",
+        ridgeSoft: "rgba(196,149,64,0.3)",
+        fillTop: "rgba(196,149,64,0.32)",
+        fillMid: "rgba(196,149,64,0.1)",
+        fillBottom: "rgba(196,149,64,0.01)",
+        label: "rgba(26,26,31,0.42)",
+        sublabel: "rgba(26,26,31,0.5)",
+        body: "rgba(26,26,31,0.72)",
+        muted: "rgba(26,26,31,0.38)",
+        pillBorder: "rgba(26,26,31,0.08)",
+        pillBg: "rgba(255,255,255,0.72)",
+        pillActiveBg: "rgba(196,149,64,0.12)",
+        pillActiveText: "#b8892e",
+        pillText: "rgba(26,26,31,0.44)",
+        pillHoverText: "rgba(26,26,31,0.68)",
+      }
+    : {
+        shellBg: "#101418",
+        shellBorder: "rgba(255,255,255,0.08)",
+        shellShadow: "0 14px 44px rgba(0,0,0,0.28)",
+        topDivider: "rgba(255,255,255,0.06)",
+        chartBg: "#101418",
+        baseline: "rgba(237,184,101,0.14)",
+        scrubLine: "rgba(255,255,255,0.12)",
+        ridge: "#edb865",
+        ridgeSoft: "rgba(237,184,101,0.3)",
+        fillTop: "rgba(237,184,101,0.38)",
+        fillMid: "rgba(237,184,101,0.12)",
+        fillBottom: "rgba(237,184,101,0.02)",
+        label: "rgba(255,255,255,0.34)",
+        sublabel: "rgba(255,255,255,0.42)",
+        body: "rgba(255,255,255,0.74)",
+        muted: "rgba(255,255,255,0.36)",
+        pillBorder: "rgba(255,255,255,0.1)",
+        pillBg: "rgba(255,255,255,0.03)",
+        pillActiveBg: "rgba(237,184,101,0.14)",
+        pillActiveText: "#e7b764",
+        pillText: "rgba(255,255,255,0.38)",
+        pillHoverText: "rgba(255,255,255,0.65)",
+      };
 
   return (
     <div
       ref={outerRef}
-      className="relative overflow-hidden rounded-[24px] border border-white/8 bg-[#101418] shadow-[0_14px_44px_rgba(0,0,0,0.28)]"
+      className="relative overflow-hidden rounded-[24px]"
+      style={{
+        background: palette.shellBg,
+        border: `1px solid ${palette.shellBorder}`,
+        boxShadow: palette.shellShadow,
+      }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
       onWheel={handleWheel}
     >
-      <div className="flex items-center justify-between border-b border-white/6 px-4 py-3">
+      <div
+        className="flex items-center justify-between px-4 py-3"
+        style={{ borderBottom: `1px solid ${palette.topDivider}` }}
+      >
         <div className="min-w-0">
-          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-white/34">
+          <div
+            className="font-mono text-[10px] uppercase tracking-[0.24em]"
+            style={{ color: palette.label }}
+          >
             Rhythm
           </div>
           {!collapsed && (
-            <div className="mt-1 text-[11px] text-white/42">
+            <div className="mt-1 text-[11px]" style={{ color: palette.sublabel }}>
               {formatWindowLabel(domainStart, domainEnd)}
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-full border border-white/10 bg-white/[0.03] p-1">
+          <div
+            className="flex rounded-full p-1"
+            style={{
+              border: `1px solid ${palette.pillBorder}`,
+              background: palette.pillBg,
+            }}
+          >
             {ZOOM_ORDER.map((level) => (
               <button
                 key={level}
                 type="button"
                 onClick={() => setZoomLevel(level)}
                 onPointerDown={(event) => event.stopPropagation()}
-                className={`rounded-full px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors ${
+                className="rounded-full px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors"
+                style={
                   zoomLevel === level
-                    ? "bg-[rgba(237,184,101,0.14)] text-[#e7b764]"
-                    : "text-white/38 hover:text-white/65"
-                }`}
+                    ? {
+                        background: palette.pillActiveBg,
+                        color: palette.pillActiveText,
+                      }
+                    : {
+                        color: palette.pillText,
+                      }
+                }
               >
                 {level === "life" ? "All" : level === "season" ? "90d" : "14d"}
               </button>
@@ -521,7 +595,12 @@ export default function JournalWaveformTimeline({
             type="button"
             onClick={() => setCollapsed((value) => !value)}
             onPointerDown={(event) => event.stopPropagation()}
-            className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-white/42 transition-colors hover:text-white/72"
+            className="rounded-full px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors"
+            style={{
+              border: `1px solid ${palette.pillBorder}`,
+              background: palette.pillBg,
+              color: palette.pillText,
+            }}
           >
             {collapsed ? "Open" : "Mini"}
           </button>
@@ -537,19 +616,19 @@ export default function JournalWaveformTimeline({
       >
         <defs>
           <linearGradient id={gradientId} x1="0%" x2="0%" y1="0%" y2="100%">
-            <stop offset="0%" stopColor="#edb865" stopOpacity="0.38" />
-            <stop offset="72%" stopColor="#edb865" stopOpacity="0.12" />
-            <stop offset="100%" stopColor="#edb865" stopOpacity="0.02" />
+            <stop offset="0%" stopColor={palette.ridge} stopOpacity={resolved === "light" ? 0.32 : 0.38} />
+            <stop offset="72%" stopColor={palette.ridge} stopOpacity={resolved === "light" ? 0.1 : 0.12} />
+            <stop offset="100%" stopColor={palette.ridge} stopOpacity={resolved === "light" ? 0.01 : 0.02} />
           </linearGradient>
         </defs>
 
-        <rect x="0" y="0" width={plotWidth + 32} height={frameHeight} fill="#101418" />
+        <rect x="0" y="0" width={plotWidth + 32} height={frameHeight} fill={palette.chartBg} />
         <line
           x1="16"
           x2={plotWidth + 16}
           y1={baselineY}
           y2={baselineY}
-          stroke="rgba(237,184,101,0.14)"
+          stroke={palette.baseline}
           strokeWidth="1"
         />
 
@@ -559,7 +638,7 @@ export default function JournalWaveformTimeline({
             x2={scrubState.x}
             y1={topInset - 2}
             y2={baselineY}
-            stroke="rgba(255,255,255,0.12)"
+            stroke={palette.scrubLine}
             strokeWidth="1"
             strokeDasharray="3 4"
           />
@@ -570,7 +649,7 @@ export default function JournalWaveformTimeline({
           <path
             d={ridgePath}
             fill="none"
-            stroke="#edb865"
+            stroke={palette.ridge}
             strokeOpacity="0.9"
             strokeWidth="1.75"
             strokeLinejoin="round"
@@ -585,14 +664,14 @@ export default function JournalWaveformTimeline({
               x2={xScale(activeVisibleEntry.ts)}
               y1={baselineY}
               y2={baselineY - activeVisibleEntry.intensity * amplitude - 10}
-              stroke="rgba(237,184,101,0.3)"
+              stroke={palette.ridgeSoft}
               strokeWidth="1"
             />
             <circle
               cx={xScale(activeVisibleEntry.ts)}
               cy={baselineY - activeVisibleEntry.intensity * amplitude}
               r="2.8"
-              fill="#edb865"
+              fill={palette.ridge}
               fillOpacity="0.9"
             />
           </>
@@ -611,7 +690,7 @@ export default function JournalWaveformTimeline({
                 cx={x}
                 cy={y}
                 r={isActive ? 3.2 : 2.2}
-                fill="#edb865"
+                fill={palette.ridge}
                 fillOpacity={isActive ? 0.92 : 0.72}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
@@ -625,17 +704,29 @@ export default function JournalWaveformTimeline({
       </svg>
 
       {!collapsed && (
-        <div className="flex flex-col gap-2 border-t border-white/6 px-4 py-3 md:flex-row md:items-end md:justify-between">
+        <div
+          className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-end md:justify-between"
+          style={{ borderTop: `1px solid ${palette.topDivider}` }}
+        >
           <div className="min-w-0">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/34">
+            <div
+              className="font-mono text-[10px] uppercase tracking-[0.16em]"
+              style={{ color: palette.label }}
+            >
               {detailTitle}
             </div>
-            <p className="mt-1 max-w-[560px] text-[12px] leading-relaxed text-white/74">
+            <p
+              className="mt-1 max-w-[560px] text-[12px] leading-relaxed"
+              style={{ color: palette.body }}
+            >
               {detailBody}
             </p>
           </div>
 
-          <div className="flex items-center gap-3 text-[10px] text-white/36 md:justify-end">
+          <div
+            className="flex items-center gap-3 text-[10px] md:justify-end"
+            style={{ color: palette.muted }}
+          >
             <span className="font-mono uppercase tracking-[0.16em]">
               {zoomLevel === "life" ? "Click to zoom in" : zoomLevel === "season" ? "Drag to browse" : "Click a point to open"}
             </span>
