@@ -26,10 +26,10 @@ function getMarkdown(editor: Editor): string {
   return (editor.storage as any).markdown.getMarkdown();
 }
 
-const FLOW_IDLE_REVEAL_MS = 2_000;
-const FLOW_FADE_START_MS = 30_000;
-const FLOW_FADE_FULL_MS = 75_000;
-const FLOW_MIN_OPACITY = 0.38;
+const FLOW_IDLE_REVEAL_MS = 3_500;
+const FLOW_FADE_START_MS = 12_000;
+const FLOW_FADE_FULL_MS = 24_000;
+const FLOW_MIN_OPACITY = 0.2;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));

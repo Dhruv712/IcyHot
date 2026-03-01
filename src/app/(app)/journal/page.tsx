@@ -516,15 +516,15 @@ export default function JournalPage() {
     ? "Flow mode is off."
     : flowState.isWriting
       ? flowState.fadedCount > 0
-        ? `${flowState.fadedCount} earlier paragraph${flowState.fadedCount === 1 ? "" : "s"} receding. Keep moving forward.`
-        : "You are in flow. Earlier paragraphs will begin to recede as they age."
+        ? `${flowState.fadedCount} earlier paragraph${flowState.fadedCount === 1 ? "" : "s"} now receding.`
+        : "Flow is active. Older paragraphs start fading after about 12 seconds."
       : "Paused. Everything is visible again.";
 
   const flowBody = !flowMode
     ? "Write normally, or turn Flow on when you want less self-editing and more forward motion."
     : flowState.isWriting
-      ? "Only the writing above your current paragraph fades, so you stay with the sentence you are making now."
-      : "Pause, select text, or hit Reveal and the full draft comes back so you can read it fresh.";
+      ? "Only writing above your current paragraph fades. If you stay in one long paragraph, nothing above it can recede yet."
+      : "Pause for a few seconds, select text, move the cursor upward, or hit Reveal and the full draft comes back.";
 
   if (isLoading) {
     return (
@@ -625,18 +625,6 @@ export default function JournalPage() {
 
             {/* Focus mode toggle */}
             <button
-              onClick={toggleFlowMode}
-              className={`hidden md:inline-flex text-[11px] font-medium uppercase tracking-[0.18em] transition-colors ${
-                flowMode
-                  ? "text-[var(--amber)] hover:text-[var(--amber-hover)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              }`}
-              title={flowMode ? "Turn flow mode off" : "Turn flow mode on"}
-            >
-              Flow
-            </button>
-
-            <button
               onClick={() => {
                 if (focusMode) {
                   setChromeHidden(false);
@@ -730,14 +718,26 @@ export default function JournalPage() {
 
               <div className="flex items-center gap-2 md:flex-shrink-0">
                 <button
+                  type="button"
                   onClick={toggleFlowMode}
-                  className={`rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] transition-colors ${
-                    flowMode
-                      ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)] hover:text-[var(--amber-hover)]"
-                      : "bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  }`}
+                  role="switch"
+                  aria-checked={flowMode}
+                  className="inline-flex items-center gap-3 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 transition-colors hover:border-[var(--border-medium)]"
                 >
-                  {flowMode ? "Flow on" : "Flow off"}
+                  <span
+                    className={`relative h-5 w-9 rounded-full transition-colors ${
+                      flowMode ? "bg-[var(--amber)]" : "bg-[var(--border-medium)]"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-[2px] h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                        flowMode ? "translate-x-4" : "translate-x-0.5"
+                      }`}
+                    />
+                  </span>
+                  <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-primary)]">
+                    Flow mode
+                  </span>
                 </button>
 
                 <button
