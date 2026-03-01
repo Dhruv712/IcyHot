@@ -1,198 +1,172 @@
+export type JournalWaveformEntryKind =
+  | "return"
+  | "streak"
+  | "steady"
+  | "bridge"
+  | "isolated";
+
 export interface JournalWaveformEntry {
   id: string;
   date: string;
+  label: string;
   intensity: number;
-  valence: number;
-  clarity: number;
   distilled: string;
-  isPivot: boolean;
-  wordCount: number;
+  streakLength: number;
+  gapBefore: number;
+  gapAfter: number;
+  kind: JournalWaveformEntryKind;
 }
 
 interface JournalWaveformSourceEntry {
   date: string;
+  name?: string;
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function hash01(seed: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return ((hash >>> 0) % 10_000) / 10_000;
+function daysBetween(a: string, b: string): number {
+  const aDate = new Date(`${a}T12:00:00`);
+  const bDate = new Date(`${b}T12:00:00`);
+  return Math.round((bDate.getTime() - aDate.getTime()) / 86_400_000);
 }
 
-function pick<T>(items: readonly T[], seed: string): T {
-  const index = Math.floor(hash01(seed) * items.length) % items.length;
-  return items[index];
+function labelForDate(date: string): string {
+  const parsed = new Date(`${date}T12:00:00`);
+  return parsed.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
-function buildNarrativeArc(t: number): {
-  valence: number;
-  intensity: number;
-  clarity: number;
-  chapter: "descent" | "friction" | "repair" | "plateau" | "breakthrough";
-} {
-  if (t < 0.18) {
-    const local = t / 0.18;
-    return {
-      valence: 0.28 - local * 0.7,
-      intensity: 0.42 + local * 0.18,
-      clarity: 0.55 - local * 0.08,
-      chapter: "descent",
-    };
-  }
-
-  if (t < 0.42) {
-    const local = (t - 0.18) / 0.24;
-    return {
-      valence: -0.4 - local * 0.18,
-      intensity: 0.64 + Math.sin(local * Math.PI) * 0.18,
-      clarity: 0.36 + local * 0.12,
-      chapter: "friction",
-    };
-  }
-
-  if (t < 0.66) {
-    const local = (t - 0.42) / 0.24;
-    return {
-      valence: -0.22 + local * 0.62,
-      intensity: 0.52 - local * 0.12,
-      clarity: 0.48 + local * 0.22,
-      chapter: "repair",
-    };
-  }
-
-  if (t < 0.88) {
-    const local = (t - 0.66) / 0.22;
-    return {
-      valence: 0.18 + Math.sin(local * Math.PI) * 0.16,
-      intensity: 0.34 + local * 0.1,
-      clarity: 0.62 + local * 0.08,
-      chapter: "plateau",
-    };
-  }
-
-  const local = (t - 0.88) / 0.12;
-  return {
-    valence: 0.24 + local * 0.38,
-    intensity: 0.58 + Math.sin(local * Math.PI) * 0.22,
-    clarity: 0.68 + local * 0.14,
-    chapter: "breakthrough",
-  };
+function classifyEntry(
+  gapBefore: number,
+  gapAfter: number,
+  streakLength: number,
+): JournalWaveformEntryKind {
+  if (gapBefore >= 7) return "return";
+  if (streakLength >= 5) return "streak";
+  if (gapBefore <= 1 && gapAfter <= 1 && streakLength >= 3) return "steady";
+  if (gapBefore >= 3 || gapAfter >= 3) return "bridge";
+  return "isolated";
 }
 
 function buildDistilledSummary(
-  date: string,
-  chapter: "descent" | "friction" | "repair" | "plateau" | "breakthrough",
-  valence: number,
-  intensity: number,
-  clarity: number,
+  kind: JournalWaveformEntryKind,
+  gapBefore: number,
+  gapAfter: number,
+  streakLength: number,
 ): string {
-  const subjects = [
-    "the relationship",
-    "work and ambition",
-    "the version of you that performs",
-    "what you owe your future self",
-    "the story you keep telling about intimacy",
-    "why the week felt heavier than it looked",
-    "how much of this is instinct versus fear",
-    "the cost of being endlessly available",
-    "whether the excitement is real or borrowed",
-    "what changed when you stopped over-explaining",
-  ] as const;
-
-  const pivots = [
-    "something small suddenly felt definitive",
-    "the energy turned before the facts did",
-    "you noticed the tension instead of narrating around it",
-    "one line from the day kept echoing after everything else faded",
-    "the emotional weather shifted faster than the plan did",
-  ] as const;
-
-  const actions = [
-    "asked for less performance and more honesty",
-    "stopped trying to smooth the contradiction away",
-    "kept circling the same unresolved question",
-    "felt the relief of naming what had been blurry",
-    "recognized the pattern before it could hide again",
-    "saw the tradeoff more clearly than usual",
-    "realized the feeling was older than today's event",
-  ] as const;
-
-  const subject = pick(subjects, `${date}:subject`);
-  const pivot = pick(pivots, `${date}:pivot`);
-  const action = pick(actions, `${date}:action`);
-
-  if (chapter === "friction") {
-    if (clarity < 0.45) {
-      return `You were tangled up in ${subject}, and it was hard to tell whether the tension was signal or static.`;
+  if (kind === "return") {
+    if (streakLength >= 3) {
+      return `You came back after ${gapBefore} quiet days and kept writing for ${streakLength} days.`;
     }
-    return `You hit a charged edge around ${subject} and ${action}.`;
+    return `You came back after ${gapBefore} quiet days.`;
   }
 
-  if (chapter === "repair") {
-    return `A gentler reading of ${subject} emerged once you ${action}.`;
+  if (kind === "streak") {
+    return `Part of a ${streakLength}-day writing streak.`;
   }
 
-  if (chapter === "plateau") {
-    return intensity < 0.4
-      ? `The day stayed quiet, but ${subject} kept glowing underneath it.`
-      : `There was steadiness here: ${subject} felt less dramatic and more true.`;
+  if (kind === "steady") {
+    return "One entry inside a steady stretch of regular journaling.";
   }
 
-  if (chapter === "breakthrough") {
-    return valence > 0.45
-      ? `A real lift arrived around ${subject}; ${pivot}.`
-      : `The breakthrough was mixed, but ${action} changed the shape of ${subject}.`;
+  if (kind === "bridge") {
+    if (gapBefore >= gapAfter && gapBefore >= 3) {
+      return `This note broke a ${gapBefore}-day pause.`;
+    }
+    if (gapAfter >= 3) {
+      return `This note came just before a ${gapAfter}-day quiet stretch.`;
+    }
   }
 
-  return `You were on the way into a deeper chapter with ${subject}, and ${pivot}.`;
+  if (streakLength === 2) {
+    return "Part of a brief two-day return to the page.";
+  }
+
+  return "A standalone journal check-in.";
 }
 
 export function buildJournalWaveformEntries(
   sourceEntries: JournalWaveformSourceEntry[],
   activeDate?: string,
 ): JournalWaveformEntry[] {
-  const dateSet = new Set(sourceEntries.map((entry) => entry.date));
-  if (activeDate) dateSet.add(activeDate);
+  const sourceMap = new Map<string, JournalWaveformSourceEntry>();
+  for (const source of sourceEntries) {
+    sourceMap.set(source.date, source);
+  }
 
-  const dates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
-  if (dates.length === 0) return [];
+  if (activeDate && !sourceMap.has(activeDate)) {
+    sourceMap.set(activeDate, { date: activeDate, name: labelForDate(activeDate) });
+  }
 
-  const total = Math.max(1, dates.length - 1);
-  return dates.map((date, index) => {
-    const t = index / total;
-    const arc = buildNarrativeArc(t);
-    const longWave = Math.sin(t * Math.PI * 2.4 + hash01(`${date}:season`) * 1.4) * 0.07;
-    const jitter = (hash01(`${date}:jitter`) - 0.5) * 0.08;
-    const pressure = (hash01(`${date}:pressure`) - 0.5) * 0.09;
+  const sorted = Array.from(sourceMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  if (sorted.length === 0) return [];
 
-    const valence = clamp(arc.valence + longWave + jitter, -1, 1);
+  const streakLengths = new Array<number>(sorted.length).fill(1);
+  let streakStart = 0;
+  for (let index = 1; index <= sorted.length; index += 1) {
+    const previous = sorted[index - 1];
+    const current = sorted[index];
+    const continues = current ? daysBetween(previous.date, current.date) <= 1 : false;
+
+    if (continues) continue;
+
+    const streakLength = index - streakStart;
+    for (let fill = streakStart; fill < index; fill += 1) {
+      streakLengths[fill] = streakLength;
+    }
+    streakStart = index;
+  }
+
+  const rawDensity = sorted.map((entry, index) => {
+    let total = 0;
+
+    for (let sample = 0; sample < sorted.length; sample += 1) {
+      const distance = Math.abs(daysBetween(entry.date, sorted[sample].date));
+      if (distance > 21) continue;
+
+      const normalizedDistance = distance / 21;
+      const weight = Math.pow(1 - normalizedDistance * normalizedDistance, 2);
+      total += weight;
+    }
+
+    total += Math.min(0.22, (streakLengths[index] - 1) * 0.035);
+    return total;
+  });
+
+  const minDensity = Math.min(...rawDensity);
+  const maxDensity = Math.max(...rawDensity);
+  const densityRange = Math.max(0.0001, maxDensity - minDensity);
+
+  return sorted.map((entry, index) => {
+    const gapBefore =
+      index === 0 ? 0 : Math.max(0, daysBetween(sorted[index - 1].date, entry.date) - 1);
+    const gapAfter =
+      index === sorted.length - 1
+        ? 0
+        : Math.max(0, daysBetween(entry.date, sorted[index + 1].date) - 1);
+    const kind = classifyEntry(gapBefore, gapAfter, streakLengths[index]);
+    const normalizedDensity = (rawDensity[index] - minDensity) / densityRange;
     const intensity = clamp(
-      arc.intensity + Math.abs(longWave) * 0.08 + pressure + (1 - Math.abs(valence)) * 0.03,
-      0.12,
+      0.24 + normalizedDensity * 0.52 + Math.min(0.12, (streakLengths[index] - 1) * 0.02),
+      0.2,
       0.92,
-    );
-    const clarity = clamp(
-      arc.clarity + Math.abs(valence) * 0.12 - (0.5 - intensity) * 0.05 + (hash01(`${date}:clarity`) - 0.5) * 0.1,
-      0.18,
-      0.94,
     );
 
     return {
-      id: date,
-      date,
+      id: entry.date,
+      date: entry.date,
+      label: entry.name || labelForDate(entry.date),
       intensity,
-      valence,
-      clarity,
-      distilled: buildDistilledSummary(date, arc.chapter, valence, intensity, clarity),
-      isPivot: false,
-      wordCount: Math.round(220 + intensity * 880 + hash01(`${date}:words`) * 260),
+      distilled: buildDistilledSummary(kind, gapBefore, gapAfter, streakLengths[index]),
+      streakLength: streakLengths[index],
+      gapBefore,
+      gapAfter,
+      kind,
     } satisfies JournalWaveformEntry;
   });
 }
