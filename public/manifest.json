@@ -1,6 +1,6 @@
 {
-  "name": "Flint & Steel",
-  "short_name": "Flint&Steel",
+  "name": "Lumos",
+  "short_name": "Lumos",
   "description": "Memory-driven relationship intelligence",
   "start_url": "/dashboard",
   "display": "standalone",

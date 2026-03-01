@@ -9,10 +9,10 @@ export async function POST() {
   }
 
   const result = await sendPushToUser(session.user.id, {
-    title: "IcyHot test",
+    title: "Lumos test",
     body: "If you see this, push notifications are working!",
     url: "/dashboard",
-    tag: "icyhot-test",
+    tag: "lumos-test",
   });
 
   return NextResponse.json({ ok: true, ...result });

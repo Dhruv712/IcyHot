@@ -55,7 +55,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="h-screen flex items-center justify-center bg-[var(--bg-base)]">
         <div className="text-center">
           <h1 className="text-4xl font-bold mb-2 text-[var(--amber)]">
-            Flint & Steel
+            Lumos
           </h1>
           <p className="text-[var(--text-secondary)] mb-6">
             Strike a spark. See what lights up.

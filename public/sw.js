@@ -1,4 +1,4 @@
-// IcyHot Service Worker — Push Notifications Only (no offline caching)
+// Lumos Service Worker — Push Notifications Only (no offline caching)
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -11,7 +11,7 @@ self.addEventListener("activate", (event) => {
 // Handle incoming push notifications
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
-  const title = data.title || "IcyHot";
+  const title = data.title || "Lumos";
   const options = {
     body: data.body || "",
     icon: "/icon-192.png",

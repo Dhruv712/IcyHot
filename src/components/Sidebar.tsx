@@ -106,7 +106,7 @@ export default function Sidebar({
         <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border-subtle)]">
           {!collapsed && (
             <h1 className="text-lg font-bold tracking-tight text-[var(--amber)]">
-              Flint & Steel
+              Lumos
             </h1>
           )}
           <button
