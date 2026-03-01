@@ -99,7 +99,7 @@ export default function Sidebar({
     <>
       {/* ── Desktop Sidebar ─────────────────────────────────────── */}
       <aside
-        className={`hidden md:flex h-screen flex-col bg-[var(--bg-card)] border-r border-[var(--border-subtle)] transition-all duration-200 flex-shrink-0 ${collapsed ? "w-[56px]" : "w-[220px]"
+        className={`hidden md:flex h-screen flex-col bg-[var(--bg-card)] border-r border-[var(--border-subtle)] transition-all duration-200 flex-shrink-0 ${collapsed ? "w-[56px]" : "w-[248px]"
           }`}
       >
         {/* Logo + collapse */}
