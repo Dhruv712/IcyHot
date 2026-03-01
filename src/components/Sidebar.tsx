@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import HealthScore from "./HealthScore";
 import NotificationToggle from "./NotificationToggle";
+import { useJournalSidebar } from "./JournalSidebarContext";
 import { useTheme } from "./ThemeProvider";
 
 interface SidebarProps {
@@ -110,6 +111,8 @@ export default function Sidebar({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { resolved, setTheme } = useTheme();
+  const { content: journalSidebarContent } = useJournalSidebar();
+  const showJournalRail = pathname === "/journal" && !collapsed && journalSidebarContent;
 
   return (
     <>
@@ -142,7 +145,7 @@ export default function Sidebar({
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 py-3 px-2 space-y-1">
+        <nav className="py-3 px-2 space-y-1">
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.href;
             return (
@@ -184,6 +187,14 @@ export default function Sidebar({
             );
           })}
         </nav>
+
+        <div className="flex-1 min-h-0">
+          {showJournalRail && (
+            <div className="h-full min-h-0 border-t border-[var(--border-subtle)]">
+              {journalSidebarContent}
+            </div>
+          )}
+        </div>
 
         {/* Actions */}
         <div className="px-2 py-3 border-t border-[var(--border-subtle)] space-y-1">

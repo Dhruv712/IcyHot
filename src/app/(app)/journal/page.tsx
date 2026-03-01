@@ -15,6 +15,7 @@ import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
 import SparkCards from "@/components/journal/SparkCards";
 import MarginLabPanel from "@/components/journal/MarginLabPanel";
+import { useJournalSidebar } from "@/components/JournalSidebarContext";
 import {
   coerceMarginTuning,
   DEFAULT_MARGIN_TUNING,
@@ -76,12 +77,12 @@ function ModeToggle({
 
 export default function JournalPage() {
   const queryClient = useQueryClient();
+  const { setContent: setJournalSidebarContent } = useJournalSidebar();
 
   const [selectedDate, setSelectedDate] = useState<string | undefined>(
     undefined
   );
   const [showSidebarMobile, setShowSidebarMobile] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<"entries" | "lab">("entries");
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
@@ -487,61 +488,114 @@ export default function JournalPage() {
     [entriesData?.entries]
   );
 
-  const renderEntriesList = () => (
-    <div className="h-full overflow-y-auto py-2">
-      {entriesByMonth.map(({ month, entries: monthEntries }) => (
-        <div key={month}>
-          <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
-            {month}
-          </div>
-          {monthEntries.map((entryItem) => {
-            const isActive =
-              selectedDate === entryItem.date ||
-              (!selectedDate && entryItem.date === todayStr);
-            const date = new Date(`${entryItem.date}T12:00:00`);
-            const day = date.getDate();
-            const weekday = date.toLocaleDateString("en-US", {
-              weekday: "short",
-            });
+  const renderEntriesList = useCallback(
+    (variant: "desktop" | "mobile") => (
+      <div className={`h-full overflow-y-auto ${variant === "desktop" ? "py-2" : "py-3"}`}>
+        {entriesByMonth.map(({ month, entries: monthEntries }) => (
+          <div key={month}>
+            <div className="px-4 py-1.5 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.16em]">
+              {month}
+            </div>
+            {monthEntries.map((entryItem) => {
+              const isActive =
+                selectedDate === entryItem.date ||
+                (!selectedDate && entryItem.date === todayStr);
+              const date = new Date(`${entryItem.date}T12:00:00`);
+              const day = date.getDate();
+              const weekday = date.toLocaleDateString("en-US", {
+                weekday: "short",
+              });
 
-            return (
-              <button
-                key={entryItem.date}
-                onClick={() => handleSelectEntry(entryItem.date)}
-                className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-3 ${
-                  isActive
-                    ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                <span
-                  className={`text-lg font-light w-7 text-right ${
+              return (
+                <button
+                  key={entryItem.date}
+                  onClick={() => handleSelectEntry(entryItem.date)}
+                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
                     isActive
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)]"
+                      ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  {day}
-                </span>
-                <span className="text-xs">{weekday}</span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
+                  <span
+                    className={`text-lg font-light w-7 text-right ${
+                      isActive
+                        ? "text-[var(--amber)]"
+                        : "text-[var(--text-muted)]"
+                    }`}
+                  >
+                    {day}
+                  </span>
+                  <span className="text-xs">{weekday}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
 
-      {entriesByMonth.length === 0 && (
-        <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
-          No entries yet
-        </div>
-      )}
-    </div>
+        {entriesByMonth.length === 0 && (
+          <div className="px-4 py-8 text-center text-xs text-[var(--text-muted)]">
+            No entries yet
+          </div>
+        )}
+      </div>
+    ),
+    [entriesByMonth, handleSelectEntry, selectedDate, todayStr],
   );
 
-  const compactMarginNotes = sidebarOpen && !chromeHidden;
-  const editorLayoutClass = compactMarginNotes
-    ? "relative max-w-[600px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-14"
-    : "relative max-w-[760px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-16";
+  const renderJournalRail = useCallback(
+    (variant: "desktop" | "mobile") => (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="border-b border-[var(--border-subtle)] px-3 py-3">
+          <div className="flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-base)] p-1 text-[10px] font-medium uppercase tracking-[0.16em]">
+            <button
+              onClick={() => setSidebarMode("entries")}
+              className={`flex-1 rounded-full px-3 py-1.5 transition-colors ${
+                sidebarMode === "entries"
+                  ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+              }`}
+            >
+              Entries
+            </button>
+            <button
+              onClick={() => setSidebarMode("lab")}
+              className={`flex-1 rounded-full px-3 py-1.5 transition-colors ${
+                sidebarMode === "lab"
+                  ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+              }`}
+            >
+              Lab
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {sidebarMode === "entries" ? (
+            renderEntriesList(variant)
+          ) : (
+            <MarginLabPanel
+              value={marginTuning}
+              onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
+              onApplyPreset={applyMarginPreset}
+              onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
+              inspector={marginInspector}
+              sparkSummary={sparkSummary}
+            />
+          )}
+        </div>
+      </div>
+    ),
+    [applyMarginPreset, marginInspector, marginTuning, renderEntriesList, sidebarMode, sparkSummary],
+  );
+
+  const compactMarginNotes = false;
+  const editorLayoutClass =
+    "relative max-w-[820px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-8 lg:ml-16";
+  const desktopJournalRailContent = useMemo(
+    () => renderJournalRail("desktop"),
+    [renderJournalRail],
+  );
 
   useEffect(() => {
     if (!showFlowDebug || !flowMode) return;
@@ -562,6 +616,11 @@ export default function JournalPage() {
     const interval = window.setInterval(readDebug, 300);
     return () => window.clearInterval(interval);
   }, [flowMode, showFlowDebug]);
+
+  useEffect(() => {
+    setJournalSidebarContent(desktopJournalRailContent);
+    return () => setJournalSidebarContent(null);
+  }, [desktopJournalRailContent, setJournalSidebarContent]);
 
   if (isLoading) {
     return (
@@ -644,28 +703,6 @@ export default function JournalPage() {
               </span>
             )}
 
-            <button
-              onClick={() => {
-                setSidebarMode("entries");
-                setSidebarOpen(true);
-              }}
-              className="hidden md:inline-flex text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-              title="Open entries"
-            >
-              Entries
-            </button>
-
-            <button
-              onClick={() => {
-                setSidebarMode("lab");
-                setSidebarOpen((value) => (sidebarOpen && sidebarMode === "lab" ? !value : true));
-              }}
-              className="hidden md:inline-flex text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-              title={sidebarOpen ? "Close Lab" : "Open Lab"}
-            >
-              Lab
-            </button>
-
             <div className="hidden md:flex items-center gap-2">
               <ModeToggle label="Flow" checked={flowMode} onToggle={toggleFlowMode} />
               <ModeToggle label="Focus" checked={focusMode} onToggle={toggleFocusMode} />
@@ -708,119 +745,17 @@ export default function JournalPage() {
         </div>
 
       </div>
-
-      <aside
-        className={`hidden md:flex h-full flex-shrink-0 bg-[var(--bg-card)] border-l border-[var(--border-subtle)] transition-all duration-200 flex-col ${
-          sidebarOpen ? "w-[320px]" : "w-[44px]"
-        } ${chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"}`}
-        style={{ transition: "width 200ms, opacity 500ms" }}
-      >
-        <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--border-subtle)]">
-          {sidebarOpen && (
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide">
-                <button
-                  onClick={() => setSidebarMode("entries")}
-                  className={`transition-colors ${
-                    sidebarMode === "entries"
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  Entries
-                </button>
-                <span className="text-[var(--text-muted)]">/</span>
-                <button
-                  onClick={() => setSidebarMode("lab")}
-                  className={`transition-colors ${
-                    sidebarMode === "lab"
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  Lab
-                </button>
-              </div>
-            </div>
-          )}
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors p-1"
-            title={sidebarOpen ? "Collapse lab" : "Expand lab"}
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              {sidebarOpen ? (
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M9 5l7 7-7 7"
-                />
-              ) : (
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 19l-7-7 7-7"
-                />
-              )}
-            </svg>
-          </button>
-        </div>
-
-        {sidebarOpen && (
-          <div className="flex-1 overflow-hidden">
-            {sidebarMode === "entries" ? (
-              renderEntriesList()
-            ) : (
-              <MarginLabPanel
-                value={marginTuning}
-                onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
-                onApplyPreset={applyMarginPreset}
-                onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
-                inspector={marginInspector}
-                sparkSummary={sparkSummary}
-              />
-            )}
-          </div>
-        )}
-      </aside>
-
       {showSidebarMobile && (
         <>
           <div
             className="fixed inset-0 z-10 bg-black/30 md:hidden"
             onClick={() => setShowSidebarMobile(false)}
           />
-          <aside className="fixed right-0 z-20 h-full w-[320px] max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border-subtle)] flex flex-col md:hidden animate-slide-in-right">
+          <aside className="fixed left-0 z-20 h-full w-[320px] max-w-[90vw] bg-[var(--bg-card)] border-r border-[var(--border-subtle)] flex flex-col md:hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
-              <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide">
-                <button
-                  onClick={() => setSidebarMode("entries")}
-                  className={`transition-colors ${
-                    sidebarMode === "entries"
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  Entries
-                </button>
-                <span className="text-[var(--text-muted)]">/</span>
-                <button
-                  onClick={() => setSidebarMode("lab")}
-                  className={`transition-colors ${
-                    sidebarMode === "lab"
-                      ? "text-[var(--amber)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  Lab
-                </button>
-              </div>
+              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                Journal
+              </span>
               <button
                 onClick={() => setShowSidebarMobile(false)}
                 className="text-xs text-[var(--amber)] hover:text-[var(--amber-hover)] transition-colors uppercase tracking-[0.18em]"
@@ -828,20 +763,7 @@ export default function JournalPage() {
                 Close
               </button>
             </div>
-            <div className="flex-1 overflow-hidden">
-              {sidebarMode === "entries" ? (
-                renderEntriesList()
-              ) : (
-                <MarginLabPanel
-                  value={marginTuning}
-                  onChange={(next) => setMarginTuning(coerceMarginTuning(next))}
-                  onApplyPreset={applyMarginPreset}
-                  onReset={() => setMarginTuning(DEFAULT_MARGIN_TUNING)}
-                  inspector={marginInspector}
-                  sparkSummary={sparkSummary}
-                />
-              )}
-            </div>
+            <div className="min-h-0 flex-1 overflow-hidden">{renderJournalRail("mobile")}</div>
           </aside>
         </>
       )}

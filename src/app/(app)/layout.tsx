@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Sidebar from "@/components/Sidebar";
 import AddContactDialog from "@/components/AddContactDialog";
+import JournalSidebarProvider from "@/components/JournalSidebarContext";
 import { useGraphData } from "@/hooks/useGraphData";
 import { useCalendarStatus, useCalendarSync } from "@/hooks/useCalendar";
 import { useJournalStatus, useJournalSync } from "@/hooks/useJournal";
@@ -130,38 +131,40 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   ).length;
 
   return (
-    <div className="h-screen w-screen flex flex-col md:flex-row overflow-hidden">
-      <Sidebar
-        healthScore={graphData?.healthScore ?? 0}
-        contactCount={contactNodes.length}
-        driftingCount={driftingCount}
-        onAddPerson={() => setShowAddDialog(true)}
-        onSyncCalendar={handleSyncCalendar}
-        onSyncJournal={handleSyncJournal}
-        calendarConnected={!!calendarStatus?.connected}
-        journalConfigured={!!journalStatus?.configured}
-        calendarSyncing={calendarSync.isPending}
-        journalSyncing={journalSync.isPending}
-      />
+    <JournalSidebarProvider>
+      <div className="h-screen w-screen flex flex-col md:flex-row overflow-hidden">
+        <Sidebar
+          healthScore={graphData?.healthScore ?? 0}
+          contactCount={contactNodes.length}
+          driftingCount={driftingCount}
+          onAddPerson={() => setShowAddDialog(true)}
+          onSyncCalendar={handleSyncCalendar}
+          onSyncJournal={handleSyncJournal}
+          calendarConnected={!!calendarStatus?.connected}
+          journalConfigured={!!journalStatus?.configured}
+          calendarSyncing={calendarSync.isPending}
+          journalSyncing={journalSync.isPending}
+        />
 
-      {/* Main content area */}
-      <main className="flex-1 relative overflow-hidden pb-16 md:pb-0">
-        {/* Sync toast */}
-        {syncMessage && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
-            <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-4 py-2.5 text-sm text-[var(--text-secondary)] shadow-lg backdrop-blur-sm">
-              {syncMessage}
+        {/* Main content area */}
+        <main className="flex-1 relative overflow-hidden pb-16 md:pb-0">
+          {/* Sync toast */}
+          {syncMessage && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
+              <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-4 py-2.5 text-sm text-[var(--text-secondary)] shadow-lg backdrop-blur-sm">
+                {syncMessage}
+              </div>
             </div>
-          </div>
+          )}
+
+          {children}
+        </main>
+
+        {/* Global modals */}
+        {showAddDialog && (
+          <AddContactDialog onClose={() => setShowAddDialog(false)} />
         )}
-
-        {children}
-      </main>
-
-      {/* Global modals */}
-      {showAddDialog && (
-        <AddContactDialog onClose={() => setShowAddDialog(false)} />
-      )}
-    </div>
+      </div>
+    </JournalSidebarProvider>
   );
 }
