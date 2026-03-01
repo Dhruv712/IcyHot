@@ -4,10 +4,11 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import type { JournalMentionReference } from "@/lib/journalRichText";
 
 export interface ExtractedMemory {
   content: string;
-  contactNames: string[];
+  peopleInvolvedNames: string[];
   significance: "high" | "medium" | "low";
 }
 
@@ -15,6 +16,7 @@ export async function extractMemories(
   journalText: string,
   entryDate: string,
   existingContacts: { id: string; name: string }[],
+  explicitMentions: JournalMentionReference[] = [],
   timeoutMs: number = 90_000
 ): Promise<ExtractedMemory[]> {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -30,6 +32,15 @@ export async function extractMemories(
     existingContacts.length > 0
       ? existingContacts.map((c) => `- "${c.name}" (id: "${c.id}")`).join("\n")
       : "(no contacts yet)";
+  const mentionListStr =
+    explicitMentions.length > 0
+      ? explicitMentions
+          .map(
+            (m) =>
+              `- "${m.label}" (contact id: "${m.contactId}", mentioned ${m.occurrences} time${m.occurrences === 1 ? "" : "s"})`,
+          )
+          .join("\n")
+      : "(no explicit mentions)";
 
   const prompt = `You are analyzing a personal journal entry to extract atomic memories â€” discrete, individual pieces of information that are worth remembering long-term.
 
@@ -37,6 +48,9 @@ The journal belongs to Dhruv. When writing memories, use "you" (second person) â
 
 Known contacts:
 ${contactListStr}
+
+Explicitly tagged people in this entry:
+${mentionListStr}
 
 ## Journal entry date: ${entryDate}
 
@@ -58,7 +72,7 @@ Return ONLY valid JSON (no markdown, no explanation):
   "memories": [
     {
       "content": "A single atomic memory statement in second person, with full temporal, locational, and relational context",
-      "contactNames": ["names of people involved, if any"],
+      "peopleInvolvedNames": ["names of people involved, if any"],
       "significance": "high" | "medium" | "low"
     }
   ]
@@ -137,7 +151,7 @@ PLACES & EXPERIENCES:
    * Journal: "Eventually the guy sitting next to me, whose name was Marquel, and I were just freaking out over the views."
    * BAD: "You and Marquel were freaking out over the views"
    * GOOD: "You and Marquel, the guy who sat next to you on your flight from San Francisco to Los Angeles on Friday, January 16, 2026, were freaking out together over how beautiful the views were"
-12. For contactNames: match to the known contacts list. Use the exact name as it appears in the contact list, first AND last if available. If the journal uses a nickname or first name only, match it to the most likely contact. If uncertain about who the most likely contact is, still match it, but write "(inferred last name)" after the name. If a last name is not specified AND the person is not in the contacts list, add the most relevant identifying descriptor instead.
+12. For peopleInvolvedNames: when the entry explicitly tagged a person, use that exact tagged label and do not remap them. Otherwise match to the known contacts list. Use the exact name as it appears in the contact list, first AND last if available. If the journal uses a nickname or first name only, match it to the most likely contact. If uncertain about who the most likely contact is, still match it, but write "(inferred last name)" after the name. If a last name is not specified AND the person is not in the contacts list, add the most relevant identifying descriptor instead.
 13. For significance:
    - "high": Major life events, important decisions, strong emotions, relationship milestones
    - "medium": Notable interactions, interesting observations, plans being made
@@ -179,7 +193,7 @@ PLACES & EXPERIENCES:
     // Validate each memory
     const valid = parsed.memories.filter((m) => {
       if (!m.content || typeof m.content !== "string") return false;
-      if (!Array.isArray(m.contactNames)) m.contactNames = [];
+      if (!Array.isArray(m.peopleInvolvedNames)) m.peopleInvolvedNames = [];
       if (!["high", "medium", "low"].includes(m.significance))
         m.significance = "medium";
       return true;

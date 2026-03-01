@@ -253,6 +253,15 @@ body[data-journal-focus] nav.fixed {
   text-underline-offset: 2px;
 }
 
+.journal-editor-content .journal-mention {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--amber-ghost-bg) 72%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+  border-radius: 0.35rem;
+  padding: 0 0.15rem;
+  white-space: nowrap;
+}
+
 /* Selection */
 .journal-editor-content ::selection {
   background: var(--amber-ghost-bg);

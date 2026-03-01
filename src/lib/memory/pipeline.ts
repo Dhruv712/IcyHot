@@ -5,7 +5,7 @@
  */
 
 import { db } from "@/db";
-import { contacts, memorySyncState } from "@/db/schema";
+import { contacts, journalDrafts, memorySyncState } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import {
   listJournalFiles,
@@ -14,6 +14,7 @@ import {
 } from "@/lib/github";
 import { extractMemories } from "./extract";
 import { storeMemories } from "./store";
+import { collectJournalMentions } from "@/lib/journalRichText";
 
 export interface MemoryProcessResult {
   filesProcessed: number;
@@ -66,6 +67,19 @@ export async function processMemories(
     .from(contacts)
     .where(eq(contacts.userId, userId));
 
+  const draftRows = await db
+    .select({
+      entryDate: journalDrafts.entryDate,
+      content: journalDrafts.content,
+      contentJson: journalDrafts.contentJson,
+    })
+    .from(journalDrafts)
+    .where(eq(journalDrafts.userId, userId));
+
+  const draftsByDate = new Map(
+    draftRows.map((draft) => [draft.entryDate, draft]),
+  );
+
   // 4. Process each new file (up to limit)
   for (const file of newFiles) {
     if (result.filesProcessed >= maxFiles) break;
@@ -89,19 +103,28 @@ export async function processMemories(
     try {
       console.log(`[memory-pipeline] Processing "${file.name}" (${entryDate})`);
 
-      const content = await getJournalFileContent(file.path);
+      const draft = draftsByDate.get(entryDate);
+      const content = draft?.content ?? (await getJournalFileContent(file.path));
       if (!content || content.trim().length < 50) {
         console.log(`[memory-pipeline] Skipping "${file.name}" — too short`);
         processedSet.add(file.name);
         continue;
       }
 
+      const explicitMentions = collectJournalMentions(draft?.contentJson ?? null);
+
       // Calculate dynamic timeout for LLM extraction based on remaining time
       const extractionTimeout = Math.max(deadline - Date.now() - 15_000, 10_000);
       console.log(`[memory-pipeline] Extraction timeout: ${Math.round(extractionTimeout / 1000)}s`);
 
       // Extract memories via LLM
-      const extracted = await extractMemories(content, entryDate, allContacts, extractionTimeout);
+      const extracted = await extractMemories(
+        content,
+        entryDate,
+        allContacts,
+        explicitMentions,
+        extractionTimeout,
+      );
       if (extracted.length === 0) {
         console.log(`[memory-pipeline] No memories extracted from "${file.name}"`);
         processedSet.add(file.name);
@@ -122,7 +145,8 @@ export async function processMemories(
         userId,
         extracted,
         entryDate,
-        allContacts
+        allContacts,
+        explicitMentions,
       );
 
       result.memoriesCreated += counts.created;

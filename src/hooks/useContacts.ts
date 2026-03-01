@@ -1,6 +1,20 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+export interface ContactRecord {
+  id: string;
+  userId: string;
+  name: string;
+  email: string | null;
+  relationshipType: string;
+  importance: number;
+  notes: string | null;
+  bio: string | null;
+  decayRateOverride: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface CreateContactInput {
   name: string;
@@ -33,7 +47,20 @@ export function useCreateContact() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["graph"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
+  });
+}
+
+export function useContacts() {
+  return useQuery<ContactRecord[]>({
+    queryKey: ["contacts"],
+    queryFn: async () => {
+      const res = await fetch("/api/contacts");
+      if (!res.ok) throw new Error("Failed to fetch contacts");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -52,6 +79,7 @@ export function useUpdateContact() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["graph"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
   });
 }
@@ -69,6 +97,7 @@ export function useGenerateBio() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["graph"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
   });
 }
@@ -84,6 +113,7 @@ export function useDeleteContact() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["graph"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
   });
 }

@@ -7,8 +7,9 @@ import {
   journalInsights,
   journalOpenLoops,
   journalNewPeople,
+  journalDrafts,
 } from "@/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { listJournalFiles, getJournalFileContent, parseJournalDate } from "./github";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -93,6 +94,16 @@ export async function syncJournalEntries(userId: string): Promise<SyncResult> {
     .from(contacts)
     .where(eq(contacts.userId, userId));
 
+  const draftRows = await db
+    .select({
+      entryDate: journalDrafts.entryDate,
+      content: journalDrafts.content,
+    })
+    .from(journalDrafts)
+    .where(eq(journalDrafts.userId, userId));
+
+  const draftsByDate = new Map(draftRows.map((draft) => [draft.entryDate, draft.content]));
+
   const result: SyncResult = {
     processed: 0,
     interactions: 0,
@@ -109,7 +120,7 @@ export async function syncJournalEntries(userId: string): Promise<SyncResult> {
       continue;
     }
 
-    const content = await getJournalFileContent(file.path);
+    const content = draftsByDate.get(entryDate) ?? (await getJournalFileContent(file.path));
     if (!content.trim()) {
       console.log(`[journal-sync] Skipping ${file.name}: empty content`);
       continue;

@@ -27,6 +27,7 @@ import {
   type SparkNudgeType,
 } from "@/lib/marginSpark";
 import { retrieveMemories } from "@/lib/memory/retrieve";
+import type { JournalMentionReference } from "@/lib/journalRichText";
 import { getDateStringInTimeZone } from "@/lib/timezone";
 import { getUserTimeZone } from "@/lib/userTimeZone";
 
@@ -118,6 +119,8 @@ function buildMarginGenerationPrompt(
   entryDate: string,
   memoriesContext: string,
   implicationsContext: string,
+  entryMentionsContext: string,
+  paragraphMentionsContext: string,
   promptAddendum: string,
   promptOverride: string,
 ): string {
@@ -153,6 +156,12 @@ ${memoriesContext || "(none)"}
 Retrieved implications:
 ${implicationsContext || "(none)"}
 
+Explicitly tagged people anywhere in this entry:
+${entryMentionsContext || "(none)"}
+
+Tagged people in this paragraph:
+${paragraphMentionsContext || "(none)"}
+
 Nudge taxonomy:
 - tension: concrete contradiction or unresolved friction.
 - callback: high-affinity memory worth revisiting right now.
@@ -167,6 +176,7 @@ Quality bar:
 - whyNow: one sentence, max 12 words.
 - actionPrompt: one concrete next move, max 9 words.
 - Evidence must map to a specific retrieved memory (date+snippet). Include evidenceMemoryId when possible.
+- If a tagged person appears, use that exact identity and do not remap them.
 
 ${addendum}
 
@@ -487,12 +497,16 @@ export async function POST(request: NextRequest) {
     fullEntry,
     entryDate,
     paragraphIndex,
+    mentionReferences,
+    paragraphMentionReferences,
     tuning,
   }: {
     paragraph?: string;
     fullEntry?: string;
     entryDate?: string;
     paragraphIndex?: number;
+    mentionReferences?: JournalMentionReference[];
+    paragraphMentionReferences?: JournalMentionReference[];
     tuning?: unknown;
     clientSessionId?: string;
   } = await request.json();
@@ -675,6 +689,18 @@ export async function POST(request: NextRequest) {
       .map((i) => `- ${i.content}`)
       .join("\n");
 
+    const entryMentionsContext = Array.isArray(mentionReferences)
+      ? mentionReferences
+          .map((mention) => `- ${mention.label} (contact id: ${mention.contactId}, mentions: ${mention.occurrences})`)
+          .join("\n")
+      : "";
+
+    const paragraphMentionsContext = Array.isArray(paragraphMentionReferences)
+      ? paragraphMentionReferences
+          .map((mention) => `- ${mention.label} (contact id: ${mention.contactId})`)
+          .join("\n")
+      : "";
+
     const client = new Anthropic({ timeout: 10_000 });
 
     const generateStart = Date.now();
@@ -690,6 +716,8 @@ export async function POST(request: NextRequest) {
             resolvedEntryDate,
             memoriesContext,
             implicationsContext,
+            entryMentionsContext,
+            paragraphMentionsContext,
             resolvedTuning.promptAddendum,
             resolvedTuning.promptOverride,
           ),

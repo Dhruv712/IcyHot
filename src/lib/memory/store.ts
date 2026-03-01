@@ -9,6 +9,7 @@ import { eq, sql } from "drizzle-orm";
 import { embedTexts } from "./embed";
 import { generateAbstractEmbedding } from "./abstract";
 import type { ExtractedMemory } from "./extract";
+import type { JournalMentionReference } from "@/lib/journalRichText";
 
 const SIMILARITY_THRESHOLD = 0.92;
 
@@ -16,7 +17,8 @@ export async function storeMemories(
   userId: string,
   extracted: ExtractedMemory[],
   entryDate: string,
-  contacts: { id: string; name: string }[]
+  contacts: { id: string; name: string }[],
+  explicitMentions: JournalMentionReference[] = [],
 ): Promise<{ created: number; reinforced: number }> {
   if (extracted.length === 0) return { created: 0, reinforced: 0 };
 
@@ -34,7 +36,14 @@ export async function storeMemories(
     const batch = extracted.slice(start, start + BATCH_SIZE);
     const results = await Promise.allSettled(
       batch.map((memory, j) =>
-        storeOneMemory(userId, memory, embeddings[start + j], entryDate, contacts)
+        storeOneMemory(
+          userId,
+          memory,
+          embeddings[start + j],
+          entryDate,
+          contacts,
+          explicitMentions,
+        )
       )
     );
     for (let k = 0; k < results.length; k++) {
@@ -62,7 +71,8 @@ async function storeOneMemory(
   memory: ExtractedMemory,
   embedding: number[],
   entryDate: string,
-  contacts: { id: string; name: string }[]
+  contacts: { id: string; name: string }[],
+  explicitMentions: JournalMentionReference[],
 ): Promise<"created" | "reinforced" | "skipped"> {
   // Check for semantic duplicates using cosine similarity
   const similar = await db.execute(sql`
@@ -100,7 +110,12 @@ async function storeOneMemory(
   }
 
   // Resolve contact names → IDs
-  const contactIds = resolveContactIds(memory.contactNames, contacts);
+  const contactIds = resolveContactIds(
+    memory.peopleInvolvedNames,
+    memory.content,
+    contacts,
+    explicitMentions,
+  );
 
   // Insert new memory
   const [inserted] = await db
@@ -144,30 +159,62 @@ async function storeOneMemory(
 }
 
 function resolveContactIds(
-  contactNames: string[],
-  contacts: { id: string; name: string }[]
+  peopleInvolvedNames: string[],
+  memoryContent: string,
+  contacts: { id: string; name: string }[],
+  explicitMentions: JournalMentionReference[],
 ): string[] {
-  if (!contactNames || contactNames.length === 0) return [];
+  const ids = new Set<string>();
+  const explicitByLabel = new Map(
+    explicitMentions.map((mention) => [mention.label.toLowerCase(), mention]),
+  );
+  const explicitByFirstName = new Map<string, JournalMentionReference[]>();
 
-  const ids: string[] = [];
-  for (const name of contactNames) {
+  for (const mention of explicitMentions) {
+    const firstName = mention.label.toLowerCase().split(/\s+/)[0];
+    const bucket = explicitByFirstName.get(firstName) ?? [];
+    bucket.push(mention);
+    explicitByFirstName.set(firstName, bucket);
+  }
+
+  for (const name of peopleInvolvedNames ?? []) {
     const nameLower = name.toLowerCase().trim();
-    // Try exact match first
-    const exact = contacts.find(
-      (c) => c.name.toLowerCase() === nameLower
-    );
-    if (exact) {
-      ids.push(exact.id);
+    const explicitExact = explicitByLabel.get(nameLower);
+    if (explicitExact) {
+      ids.add(explicitExact.contactId);
       continue;
     }
+
+    const firstName = nameLower.split(/\s+/)[0];
+    const explicitFirstMatches = explicitByFirstName.get(firstName) ?? [];
+    if (explicitFirstMatches.length === 1) {
+      ids.add(explicitFirstMatches[0].contactId);
+      continue;
+    }
+
+    // Try exact match first
+    const exact = contacts.find((c) => c.name.toLowerCase() === nameLower);
+    if (exact) {
+      ids.add(exact.id);
+      continue;
+    }
+
     // Try first-name match (if the contact list name contains the given name)
     const partial = contacts.find((c) => {
       const parts = c.name.toLowerCase().split(/\s+/);
       return parts.some((p) => p === nameLower);
     });
     if (partial) {
-      ids.push(partial.id);
+      ids.add(partial.id);
     }
   }
-  return [...new Set(ids)]; // Deduplicate
+
+  const memoryLower = memoryContent.toLowerCase();
+  for (const mention of explicitMentions) {
+    if (memoryLower.includes(mention.label.toLowerCase())) {
+      ids.add(mention.contactId);
+    }
+  }
+
+  return [...ids];
 }

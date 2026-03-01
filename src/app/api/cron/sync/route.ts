@@ -1,21 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { users, dailyBriefings, dailySuggestions } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { users } from "@/db/schema";
 import { syncJournalEntries } from "@/lib/journal";
 import { syncCalendarEvents } from "@/lib/calendar";
 import { commitDirtyDraftsToGithub } from "@/lib/github";
-import { generateDailyBriefing } from "@/lib/briefing";
 import { sendPushToUser } from "@/lib/push";
 import { snapshotHealthScoreForDate } from "@/lib/health";
-import { generateWeeklyRetro } from "@/lib/retro";
 import { processMemories } from "@/lib/memory/pipeline";
 import { consolidateMemories } from "@/lib/memory/consolidate";
 import { generateProvocationsForUser } from "@/lib/memory/provoke";
 import { createConsolidationDigest } from "@/lib/memory/consolidationDigest";
 import {
   getDateStringInTimeZone,
-  getWeekdayInTimeZone,
 } from "@/lib/timezone";
 import { getUserTimeZone } from "@/lib/userTimeZone";
 
@@ -51,17 +47,13 @@ export async function GET(request: NextRequest) {
       error?: string;
     };
     provocations: { success: boolean; generated?: number; error?: string };
-    briefing: { success: boolean; error?: string };
-    push: { success: boolean; sent?: number; error?: string };
     healthSnapshot: { success: boolean; error?: string };
-    retro?: { success: boolean; error?: string };
   }> = [];
 
   for (const user of allUsers) {
     const now = new Date();
     const timeZone = await getUserTimeZone(user.id);
     const today = getDateStringInTimeZone(now, timeZone);
-    const isSunday = getWeekdayInTimeZone(now, timeZone) === 0;
 
     const result: (typeof results)[0] = {
       userId: user.id,
@@ -73,8 +65,6 @@ export async function GET(request: NextRequest) {
       consolidation: { success: false },
       overnightPush: { success: false },
       provocations: { success: false },
-      briefing: { success: false },
-      push: { success: false },
       healthSnapshot: { success: false },
     };
 
@@ -117,12 +107,10 @@ export async function GET(request: NextRequest) {
 
     // Skip expensive downstream steps if no new content was synced
     if (!hasNewContent) {
-      console.log(`[cron] No new content for ${user.id}, skipping briefing generation`);
+      console.log(`[cron] No new content for ${user.id}, skipping downstream refresh`);
       result.memory = { success: true };
       result.consolidation = { success: true };
       result.overnightPush = { success: true, sent: 0, skipped: "No new content" };
-      result.briefing = { success: true };
-      result.push = { success: true, sent: 0 };
     } else {
       // Memory extraction (parallel system — failures don't block briefing)
       try {
@@ -161,8 +149,8 @@ export async function GET(request: NextRequest) {
             const overnightPush = await sendPushToUser(user.id, {
               title: "Overnight memory connections are ready",
               body: digest.summary.slice(0, 200),
-              url: "/dashboard?tab=overnight",
-              tag: "icyhot-overnight",
+              url: "/dashboard",
+              tag: "lumos-overnight",
             });
             result.overnightPush = {
               success: true,
@@ -193,54 +181,6 @@ export async function GET(request: NextRequest) {
           skipped: "Consolidation failed",
         };
       }
-
-      // Invalidate stale briefing + suggestions so we regenerate with fresh synced data
-      try {
-        await db.delete(dailyBriefings).where(
-          and(eq(dailyBriefings.userId, user.id), eq(dailyBriefings.briefingDate, today))
-        );
-        await db.delete(dailySuggestions).where(
-          and(eq(dailySuggestions.userId, user.id), eq(dailySuggestions.suggestedDate, today))
-        );
-      } catch (e) {
-        console.error(`[cron] Cache invalidation failed for ${user.id}:`, e);
-      }
-
-      // Generate daily briefing with fresh data
-      try {
-        const briefing = await generateDailyBriefing(user.id, {
-          date: today,
-          timeZone,
-        });
-        result.briefing = { success: true };
-
-        // Send push notification with briefing summary
-        if (briefing?.summary) {
-          try {
-            const pushResult = await sendPushToUser(user.id, {
-              title: "Your morning briefing",
-              body: briefing.summary.slice(0, 200),
-              url: "/dashboard?tab=today",
-              tag: "icyhot-briefing",
-            });
-            result.push = { success: true, sent: pushResult.sent };
-          } catch (pushError) {
-            console.error(`[cron] Push failed for ${user.id}:`, pushError);
-            result.push = {
-              success: false,
-              error: pushError instanceof Error ? pushError.message : "Unknown error",
-            };
-          }
-        } else {
-          result.push = { success: true, sent: 0 };
-        }
-      } catch (error) {
-        console.error(`[cron] Briefing generation failed for ${user.id}:`, error);
-        result.briefing = {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
     }
 
     // Provocations — run daily regardless of new content (they look back 3 days into existing data)
@@ -268,34 +208,6 @@ export async function GET(request: NextRequest) {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
-    }
-
-    // Sunday: generate weekly retrospective
-    if (isSunday) {
-      result.retro = { success: false };
-      try {
-        const retro = await generateWeeklyRetro(user.id, { timeZone });
-        result.retro = { success: true };
-
-        if (retro?.weekSummary) {
-          try {
-            await sendPushToUser(user.id, {
-              title: "Your weekly retro is ready",
-              body: retro.weekSummary.slice(0, 200),
-              url: "/dashboard?tab=week",
-              tag: "icyhot-weekly-retro",
-            });
-          } catch (pushError) {
-            console.error(`[cron] Retro push failed for ${user.id}:`, pushError);
-          }
-        }
-      } catch (error) {
-        console.error(`[cron] Weekly retro failed for ${user.id}:`, error);
-        result.retro = {
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
     }
 
     results.push(result);

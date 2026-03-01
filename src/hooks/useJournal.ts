@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { JournalRichTextNode } from "@/lib/journalRichText";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -188,6 +189,7 @@ export function useJournalNewPersonAction() {
 export interface JournalEntry {
   filename: string;
   content: string;
+  contentJson: JournalRichTextNode | null;
   entryDate: string;
   exists: boolean;
   source: "db" | "github" | "new";
@@ -195,6 +197,7 @@ export interface JournalEntry {
 
 export interface JournalSavePayload {
   content: string;
+  contentJson: JournalRichTextNode | null;
   entryDate: string;
 }
 
@@ -206,6 +209,42 @@ export interface JournalSaveResult {
 export interface JournalEntryListItem {
   date: string;
   name: string;
+}
+
+export interface JournalReminder {
+  id: string;
+  entryDate: string;
+  entryId: string | null;
+  title: string;
+  body: string | null;
+  sourceText: string;
+  selectionAnchor: unknown;
+  contactId: string | null;
+  contactName: string | null;
+  status: "active" | "done" | "dismissed";
+  dueAt: string;
+  repeatRule: "none" | "daily" | "weekly" | "monthly";
+  lastTriggeredAt: string | null;
+  completedAt: string | null;
+  dismissedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JournalReminderBuckets {
+  overdue: JournalReminder[];
+  upcoming: JournalReminder[];
+}
+
+export interface CreateJournalReminderPayload {
+  entryDate: string;
+  title: string;
+  body?: string;
+  sourceText: string;
+  dueAt: string;
+  repeatRule: "none" | "daily" | "weekly" | "monthly";
+  contactId?: string;
+  selectionAnchor?: unknown;
 }
 
 export function useJournalEntries() {
@@ -248,6 +287,102 @@ export function useSaveJournalEntry() {
         throw new Error(data.error || "Save failed");
       }
       return res.json();
+    },
+  });
+}
+
+export function useJournalReminders() {
+  return useQuery<JournalReminderBuckets>({
+    queryKey: ["journal-reminders", "active"],
+    queryFn: async () => {
+      const res = await fetch("/api/journal/reminders?status=active");
+      if (!res.ok) throw new Error("Failed to fetch reminders");
+      return res.json();
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useCreateJournalReminder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: CreateJournalReminderPayload) => {
+      const res = await fetch("/api/journal/reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to create reminder");
+      }
+      return res.json() as Promise<{ reminder: JournalReminder }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journal-reminders", "active"] });
+    },
+  });
+}
+
+export function useCompleteJournalReminder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/journal/reminders/${id}/complete`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to complete reminder");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journal-reminders", "active"] });
+    },
+  });
+}
+
+export function useDismissJournalReminder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/journal/reminders/${id}/dismiss`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to dismiss reminder");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journal-reminders", "active"] });
+    },
+  });
+}
+
+export function useSnoozeJournalReminder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, dueAt }: { id: string; dueAt: string }) => {
+      const res = await fetch(`/api/journal/reminders/${id}/snooze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueAt }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to snooze reminder");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journal-reminders", "active"] });
     },
   });
 }

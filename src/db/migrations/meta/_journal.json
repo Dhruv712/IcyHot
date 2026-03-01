@@ -43,6 +43,13 @@
       "when": 1772180225511,
       "tag": "0005_consolidation_digest_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772409073874,
+      "tag": "0006_journal_mentions_reminders",
+      "breakpoints": true
     }
   ]
 }

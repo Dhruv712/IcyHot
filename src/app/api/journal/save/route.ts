@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         filename,
         content: draft.content,
+        contentJson: draft.contentJson,
         entryDate,
         exists: true,
         source: "db",
@@ -58,6 +59,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         filename,
         content: "",
+        contentJson: null,
         entryDate,
         exists: false,
         source: "new",
@@ -73,6 +75,7 @@ export async function GET(request: NextRequest) {
         userId: session.user.id,
         entryDate,
         content,
+        contentJson: null,
         githubSha: sha,
         committedToGithubAt: new Date(),
         updatedAt: new Date(),
@@ -82,6 +85,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       filename,
       content,
+      contentJson: null,
       entryDate,
       exists: true,
       source: "github",
@@ -108,7 +112,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { content, entryDate } = await request.json();
+    const { content, contentJson, entryDate } = await request.json();
 
     if (!content || !entryDate) {
       return NextResponse.json(
@@ -124,12 +128,14 @@ export async function POST(request: NextRequest) {
         userId: session.user.id,
         entryDate,
         content,
+        contentJson: contentJson ?? null,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: [journalDrafts.userId, journalDrafts.entryDate],
         set: {
           content,
+          contentJson: contentJson ?? null,
           updatedAt: new Date(),
         },
         setWhere: and(
@@ -142,6 +148,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       saved: true,
       updatedAt: result.updatedAt,
+      contentJson: contentJson ?? null,
     });
   } catch (error) {
     console.error("[journal-save] Save error:", error);

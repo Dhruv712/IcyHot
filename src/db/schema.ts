@@ -12,6 +12,7 @@ import {
   uniqueIndex,
   index,
   vector,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 export const relationshipTypeEnum = pgEnum("relationship_type", [
@@ -113,6 +114,19 @@ export const journalNudgeReasonEnum = pgEnum("journal_nudge_reason", [
   "already_obvious",
   "bad_tone",
   "not_now",
+]);
+
+export const journalReminderStatusEnum = pgEnum("journal_reminder_status", [
+  "active",
+  "done",
+  "dismissed",
+]);
+
+export const journalReminderRepeatRuleEnum = pgEnum("journal_reminder_repeat_rule", [
+  "none",
+  "daily",
+  "weekly",
+  "monthly",
 ]);
 
 export const interactions = pgTable("interactions", {
@@ -233,12 +247,50 @@ export const journalDrafts = pgTable(
       .notNull(),
     entryDate: date("entry_date").notNull(),
     content: text("content").notNull(),
+    contentJson: jsonb("content_json"),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     committedToGithubAt: timestamp("committed_to_github_at"),
     githubSha: text("github_sha"),
   },
   (table) => [
     uniqueIndex("journal_drafts_user_date").on(table.userId, table.entryDate),
+  ]
+);
+
+export const journalReminders = pgTable(
+  "journal_reminders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    entryDate: date("entry_date").notNull(),
+    entryId: uuid("entry_id").references(() => journalDrafts.id, {
+      onDelete: "set null",
+    }),
+    title: text("title").notNull(),
+    body: text("body"),
+    sourceText: text("source_text").notNull(),
+    selectionAnchor: jsonb("selection_anchor"),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    status: journalReminderStatusEnum("status").default("active").notNull(),
+    dueAt: timestamp("due_at").notNull(),
+    repeatRule: journalReminderRepeatRuleEnum("repeat_rule").default("none").notNull(),
+    lastTriggeredAt: timestamp("last_triggered_at"),
+    completedAt: timestamp("completed_at"),
+    dismissedAt: timestamp("dismissed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("journal_reminders_user_due_idx").on(table.userId, table.dueAt),
+    index("journal_reminders_user_status_due_idx").on(
+      table.userId,
+      table.status,
+      table.dueAt
+    ),
   ]
 );
 

@@ -12,6 +12,7 @@ import {
   type SparkNudge,
   type SparkNudgeType,
 } from "@/lib/marginSpark";
+import type { JournalMentionReference } from "@/lib/journalRichText";
 
 export interface MarginAnnotation {
   id: string;
@@ -316,6 +317,8 @@ export function useMarginIntelligence({
       paragraphText: string,
       fullEntry: string,
       paragraphIndex: number,
+      mentionReferences?: JournalMentionReference[],
+      paragraphMentionReferences?: JournalMentionReference[],
     ) => {
       if (annotationCountRef.current >= resolvedTuning.client.maxAnnotationsPerEntry) {
         setInspector({
@@ -394,6 +397,8 @@ export function useMarginIntelligence({
             fullEntry,
             entryDate,
             paragraphIndex,
+            mentionReferences,
+            paragraphMentionReferences,
             tuning: resolvedTuning,
             clientSessionId: sessionIdRef.current,
           }),
@@ -486,7 +491,12 @@ export function useMarginIntelligence({
   );
 
   const handleParagraphChange = useCallback(
-    (paragraph: { index: number; text: string }, fullMarkdown: string) => {
+    (
+      paragraph: { index: number; text: string },
+      fullMarkdown: string,
+      mentionReferences?: JournalMentionReference[],
+      paragraphMentionReferences?: JournalMentionReference[],
+    ) => {
       if (!enabled) return;
 
       const text = paragraph.text.trim();
@@ -525,7 +535,13 @@ export function useMarginIntelligence({
       });
 
       debounceRef.current = setTimeout(() => {
-        triggerQuery(text, fullMarkdown, paragraph.index);
+        triggerQuery(
+          text,
+          fullMarkdown,
+          paragraph.index,
+          mentionReferences,
+          paragraphMentionReferences,
+        );
       }, resolvedTuning.client.debounceMs);
     },
     [enabled, triggerQuery, resolvedTuning.client],

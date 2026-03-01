@@ -1,23 +1,37 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useJournalEntry,
   useJournalEntries,
   useSaveJournalEntry,
+  useCreateJournalReminder,
   type JournalEntry,
   type JournalEntryListItem,
 } from "@/hooks/useJournal";
 import dynamic from "next/dynamic";
-import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
+import type {
+  JournalContactOption,
+  MarkdownEditorHandle,
+  ReminderSelectionRequest,
+} from "@/components/journal/MarkdownEditor";
 import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
 import SparkCards from "@/components/journal/SparkCards";
 import MarginLabPanel from "@/components/journal/MarginLabPanel";
+import CreateReminderModal, {
+  type ReminderDraft,
+} from "@/components/journal/CreateReminderModal";
 import NotificationToggle from "@/components/NotificationToggle";
 import { useJournalSidebar } from "@/components/JournalSidebarContext";
 import { useTheme } from "@/components/ThemeProvider";
+import { useContacts } from "@/hooks/useContacts";
+import {
+  collectBlockMentions,
+  collectJournalMentions,
+} from "@/lib/journalRichText";
 import {
   coerceMarginTuning,
   DEFAULT_MARGIN_TUNING,
@@ -42,6 +56,22 @@ function toLocalYmd(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function shortenReminderTitle(text: string): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 72) return cleaned;
+  return `${cleaned.slice(0, 69).trimEnd()}...`;
+}
+
+function defaultReminderDate(): string {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  return toLocalYmd(next);
+}
+
+function toNoonIso(dateOnly: string): string {
+  return new Date(`${dateOnly}T12:00:00`).toISOString();
 }
 
 function ModeToggle({
@@ -78,12 +108,18 @@ function ModeToggle({
 }
 
 export default function JournalPage() {
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { setContent: setJournalSidebarContent } = useJournalSidebar();
   const { resolved, setTheme } = useTheme();
+  const selectedDateParam = searchParams.get("date");
+  const initialSelectedDate =
+    selectedDateParam && /^\d{4}-\d{2}-\d{2}$/.test(selectedDateParam)
+      ? selectedDateParam
+      : undefined;
 
   const [selectedDate, setSelectedDate] = useState<string | undefined>(
-    undefined
+    initialSelectedDate
   );
   const [showSidebarMobile, setShowSidebarMobile] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<"entries" | "lab">("entries");
@@ -117,7 +153,9 @@ export default function JournalPage() {
 
   const { data: entry, isLoading } = useJournalEntry(entryDate);
   const { data: entriesData } = useJournalEntries();
+  const { data: contactsData } = useContacts();
   const saveMutation = useSaveJournalEntry();
+  const createReminderMutation = useCreateJournalReminder();
   const {
     annotations: marginAnnotations,
     nudges: sparkNudges,
@@ -135,6 +173,7 @@ export default function JournalPage() {
   });
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [reminderDraft, setReminderDraft] = useState<ReminderDraft | null>(null);
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -330,6 +369,7 @@ export default function JournalPage() {
   // ── Core save function ──────────────────────────────────────────────
   const doSave = useCallback(() => {
     const content = editorRef.current?.getMarkdown() ?? "";
+    const contentJson = editorRef.current?.getContentJson() ?? null;
 
     if (!content.trim() || isSavingRef.current) return;
     if (!isDirtyRef.current) return;
@@ -339,7 +379,7 @@ export default function JournalPage() {
     setSaveStatus("saving");
 
     saveMutation.mutate(
-      { content, entryDate: savingDate },
+      { content, contentJson, entryDate: savingDate },
       {
         onSuccess: () => {
           isDirtyRef.current = false;
@@ -349,7 +389,7 @@ export default function JournalPage() {
           // Update the react-query cache so navigating back shows latest
           const queryKey = ["journal-entry", savingDate];
           queryClient.setQueryData<JournalEntry>(queryKey, (old) =>
-            old ? { ...old, content, exists: true, source: "db" } : old
+            old ? { ...old, content, contentJson, exists: true, source: "db" } : old
           );
 
           if (savedFadeTimerRef.current)
@@ -392,7 +432,10 @@ export default function JournalPage() {
   const handleActiveParagraph = useCallback(
     (p: { index: number; text: string }) => {
       const fullMd = editorRef.current?.getMarkdown() ?? "";
-      handleMarginParagraph(p, fullMd);
+      const contentJson = editorRef.current?.getContentJson();
+      const mentionReferences = collectJournalMentions(contentJson);
+      const paragraphMentionReferences = collectBlockMentions(contentJson, p.index);
+      handleMarginParagraph(p, fullMd, mentionReferences, paragraphMentionReferences);
     },
     [handleMarginParagraph]
   );
@@ -468,6 +511,59 @@ export default function JournalPage() {
       setShowSidebarMobile(false);
     },
     [todayStr, doSave]
+  );
+
+  const journalContacts = useMemo<JournalContactOption[]>(
+    () =>
+      (contactsData ?? []).map((contact) => ({
+        id: contact.id,
+        name: contact.name,
+        relationshipType: contact.relationshipType,
+      })),
+    [contactsData],
+  );
+
+  const handleReminderRequest = useCallback(
+    (selection: ReminderSelectionRequest) => {
+      const linkedContact =
+        selection.contactId && (contactsData ?? []).some((contact) => contact.id === selection.contactId)
+          ? selection.contactId
+          : "";
+
+      setReminderDraft({
+        sourceText: selection.text,
+        title: shortenReminderTitle(selection.text),
+        body: "",
+        dueDate: defaultReminderDate(),
+        repeatRule: "none",
+        contactId: linkedContact,
+        selectionAnchor: selection.selectionAnchor,
+      });
+    },
+    [contactsData],
+  );
+
+  const handleReminderSubmit = useCallback(
+    (draft: ReminderDraft) => {
+      createReminderMutation.mutate(
+        {
+          entryDate,
+          title: draft.title,
+          body: draft.body || undefined,
+          sourceText: draft.sourceText,
+          dueAt: toNoonIso(draft.dueDate),
+          repeatRule: draft.repeatRule,
+          contactId: draft.contactId || undefined,
+          selectionAnchor: draft.selectionAnchor,
+        },
+        {
+          onSuccess: () => {
+            setReminderDraft(null);
+          },
+        },
+      );
+    },
+    [createReminderMutation, entryDate],
   );
 
   const entriesByMonth = useMemo<Array<{ month: string; entries: JournalEntryListItem[] }>>(
@@ -739,8 +835,11 @@ export default function JournalPage() {
               ref={editorRef}
               key={selectedDate ?? "today"}
               initialContent={entry?.content ?? ""}
+              initialContentJson={entry?.contentJson ?? null}
+              contacts={journalContacts}
               onChange={handleEditorChange}
               onActiveParagraph={handleActiveParagraph}
+              onCreateReminderRequest={handleReminderRequest}
               placeholder="Start writing..."
               flowMode={flowMode}
             />
@@ -785,6 +884,16 @@ export default function JournalPage() {
             <div className="min-h-0 flex-1 overflow-hidden">{renderJournalRail("mobile")}</div>
           </aside>
         </>
+      )}
+      {reminderDraft && (
+        <CreateReminderModal
+          key={`${entryDate}:${reminderDraft.selectionAnchor ? JSON.stringify(reminderDraft.selectionAnchor) : reminderDraft.sourceText}`}
+          contacts={contactsData ?? []}
+          initialValue={reminderDraft}
+          onClose={() => setReminderDraft(null)}
+          onSubmit={handleReminderSubmit}
+          submitting={createReminderMutation.isPending}
+        />
       )}
     </div>
   );
