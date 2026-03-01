@@ -10,19 +10,20 @@ import {
   type JournalEntryListItem,
 } from "@/hooks/useJournal";
 import dynamic from "next/dynamic";
-import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
+import type {
+  FlowModeState,
+  MarkdownEditorHandle,
+} from "@/components/journal/MarkdownEditor";
 import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
 import SparkCards from "@/components/journal/SparkCards";
 import MarginLabPanel from "@/components/journal/MarginLabPanel";
-import JournalWaveformTimeline from "@/components/journal/JournalWaveformTimeline";
 import {
   coerceMarginTuning,
   DEFAULT_MARGIN_TUNING,
   MARGIN_TUNING_STORAGE_KEY,
   type MarginTuningSettings,
 } from "@/lib/marginTuning";
-import { buildJournalWaveformEntries } from "@/lib/journalWaveform";
 
 const MarkdownEditor = dynamic(
   () => import("@/components/journal/MarkdownEditor"),
@@ -31,6 +32,7 @@ const MarkdownEditor = dynamic(
 
 const AUTOSAVE_DELAY = 2_000;
 const FOCUS_MOUSE_IDLE = 2_000; // re-fade after mouse stops for 2s
+const FLOW_MODE_STORAGE_KEY = "journal-flow-mode-enabled";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -52,6 +54,18 @@ export default function JournalPage() {
   const [sidebarMode, setSidebarMode] = useState<"entries" | "lab">("entries");
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
+  const [flowMode, setFlowMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const raw = localStorage.getItem(FLOW_MODE_STORAGE_KEY);
+    return raw === null ? true : raw === "true";
+  });
+  const [flowState, setFlowState] = useState<FlowModeState>({
+    modeEnabled: flowMode,
+    isWriting: false,
+    isRevealed: true,
+    fadedCount: 0,
+    activeIndex: 0,
+  });
   const [marginTuning, setMarginTuning] = useState<MarginTuningSettings>(() => {
     if (typeof window === "undefined") return DEFAULT_MARGIN_TUNING;
     try {
@@ -116,6 +130,14 @@ export default function JournalPage() {
       console.warn("[margin-lab] Failed to persist tuning:", error);
     }
   }, [marginTuning]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FLOW_MODE_STORAGE_KEY, String(flowMode));
+    } catch (error) {
+      console.warn("[journal] Failed to persist flow mode:", error);
+    }
+  }, [flowMode]);
 
   const applyMarginPreset = useCallback(
     (preset: "subtle" | "balanced" | "generous") => {
@@ -340,6 +362,34 @@ export default function JournalPage() {
     [handleMarginParagraph]
   );
 
+  const handleRevealFlow = useCallback(() => {
+    editorRef.current?.revealFlow();
+  }, []);
+
+  const toggleFlowMode = useCallback(() => {
+    if (flowMode) {
+      handleRevealFlow();
+      setFlowState({
+        modeEnabled: false,
+        isWriting: false,
+        isRevealed: true,
+        fadedCount: 0,
+        activeIndex: 0,
+      });
+      setFlowMode(false);
+      return;
+    }
+
+    setFlowMode(true);
+    setFlowState({
+      modeEnabled: true,
+      isWriting: false,
+      isRevealed: true,
+      fadedCount: 0,
+      activeIndex: 0,
+    });
+  }, [flowMode, handleRevealFlow]);
+
   // ── Cmd+S force-save ────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -390,10 +440,6 @@ export default function JournalPage() {
     [todayStr, doSave]
   );
 
-  const waveformEntries = useMemo(
-    () => buildJournalWaveformEntries(entriesData?.entries ?? [], entryDate),
-    [entriesData?.entries, entryDate]
-  );
   const entriesByMonth = useMemo<Array<{ month: string; entries: JournalEntryListItem[] }>>(
     () => {
       const groups = new Map<string, JournalEntryListItem[]>();
@@ -465,6 +511,20 @@ export default function JournalPage() {
       )}
     </div>
   );
+
+  const flowHeadline = !flowMode
+    ? "Flow mode is off."
+    : flowState.isWriting
+      ? flowState.fadedCount > 0
+        ? `${flowState.fadedCount} earlier paragraph${flowState.fadedCount === 1 ? "" : "s"} receding. Keep moving forward.`
+        : "You are in flow. Earlier paragraphs will begin to recede as they age."
+      : "Paused. Everything is visible again.";
+
+  const flowBody = !flowMode
+    ? "Write normally, or turn Flow on when you want less self-editing and more forward motion."
+    : flowState.isWriting
+      ? "Only the writing above your current paragraph fades, so you stay with the sentence you are making now."
+      : "Pause, select text, or hit Reveal and the full draft comes back so you can read it fresh.";
 
   if (isLoading) {
     return (
@@ -565,6 +625,18 @@ export default function JournalPage() {
 
             {/* Focus mode toggle */}
             <button
+              onClick={toggleFlowMode}
+              className={`hidden md:inline-flex text-[11px] font-medium uppercase tracking-[0.18em] transition-colors ${
+                flowMode
+                  ? "text-[var(--amber)] hover:text-[var(--amber-hover)]"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+              }`}
+              title={flowMode ? "Turn flow mode off" : "Turn flow mode on"}
+            >
+              Flow
+            </button>
+
+            <button
               onClick={() => {
                 if (focusMode) {
                   setChromeHidden(false);
@@ -616,6 +688,8 @@ export default function JournalPage() {
               onChange={handleEditorChange}
               onActiveParagraph={handleActiveParagraph}
               placeholder="Start writing..."
+              flowMode={flowMode}
+              onFlowStateChange={setFlowState}
             />
             {sparkNudges.length > 0 ? (
               <SparkCards
@@ -640,12 +714,42 @@ export default function JournalPage() {
             chromeHidden ? "opacity-20" : "opacity-100"
           }`}
         >
-          <JournalWaveformTimeline
-            key={entryDate}
-            entries={waveformEntries}
-            activeEntryId={entryDate}
-            onSelectEntry={(selected) => handleSelectEntry(selected.date)}
-          />
+          <div className="rounded-[24px] border border-[var(--border-subtle)] bg-[var(--bg-card)] px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.08)] md:px-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
+                  Flow
+                </div>
+                <p className="mt-1 text-sm text-[var(--text-primary)]">
+                  {flowHeadline}
+                </p>
+                <p className="mt-1 max-w-[620px] text-xs leading-relaxed text-[var(--text-secondary)]">
+                  {flowBody}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 md:flex-shrink-0">
+                <button
+                  onClick={toggleFlowMode}
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] transition-colors ${
+                    flowMode
+                      ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)] hover:text-[var(--amber-hover)]"
+                      : "bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  {flowMode ? "Flow on" : "Flow off"}
+                </button>
+
+                <button
+                  onClick={handleRevealFlow}
+                  disabled={!flowMode}
+                  className="rounded-full border border-[var(--border-subtle)] px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Reveal
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
