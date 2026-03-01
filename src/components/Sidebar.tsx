@@ -109,10 +109,10 @@ export default function Sidebar({
             <Image
               src="/brand/lumos-wordmark.png"
               alt="Lumos"
-              width={180}
-              height={48}
+              width={220}
+              height={60}
               priority
-              className="h-8 w-auto"
+              className="h-10 w-auto"
             />
           )}
           <button
