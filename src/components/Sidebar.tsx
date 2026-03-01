@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useJournalSidebar } from "./JournalSidebarContext";
@@ -105,9 +106,14 @@ export default function Sidebar({
         {/* Logo + collapse */}
         <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border-subtle)]">
           {!collapsed && (
-            <h1 className="text-lg font-bold tracking-tight text-[var(--amber)]">
-              Lumos
-            </h1>
+            <Image
+              src="/brand/lumos-wordmark.png"
+              alt="Lumos"
+              width={180}
+              height={48}
+              priority
+              className="h-8 w-auto"
+            />
           )}
           <button
             onClick={() => setCollapsed(!collapsed)}

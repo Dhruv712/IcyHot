@@ -16,20 +16,20 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Lumos",
   description: "Memory-driven relationship intelligence",
-  manifest: "/manifest.json",
+  manifest: "/manifest.json?v=2",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Lumos",
   },
   icons: {
-    shortcut: "/favicon.ico",
+    shortcut: "/favicon.ico?v=2",
     icon: [
-      { url: "/favicon.ico", sizes: "any" },
-      { url: "/icon-192.png", sizes: "192x192" },
-      { url: "/icon-512.png", sizes: "512x512" },
+      { url: "/favicon.ico?v=2", sizes: "any" },
+      { url: "/lumos-icon-192.png", sizes: "192x192" },
+      { url: "/lumos-icon-512.png", sizes: "512x512" },
     ],
-    apple: "/apple-touch-icon.png",
+    apple: "/apple-touch-icon.png?v=2",
   },
 };
 

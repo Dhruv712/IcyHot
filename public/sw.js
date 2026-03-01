@@ -14,8 +14,8 @@ self.addEventListener("push", (event) => {
   const title = data.title || "Lumos";
   const options = {
     body: data.body || "",
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    icon: "/lumos-icon-192.png",
+    badge: "/lumos-icon-192.png",
     data: { url: data.url || "/dashboard" },
     tag: data.tag || "icyhot-daily",
   };
