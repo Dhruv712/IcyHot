@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useJournalSidebar } from "./JournalSidebarContext";
 
 interface SidebarProps {
@@ -91,7 +90,6 @@ export default function Sidebar({
   onAddPerson,
 }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const { content: journalSidebarContent } = useJournalSidebar();
   const showJournalRail = pathname === "/journal" && !collapsed && journalSidebarContent;
@@ -135,13 +133,9 @@ export default function Sidebar({
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.href;
             return (
-              <Link
+              <a
                 key={item.href}
                 href={item.href}
-                onClick={(event) => {
-                  event.preventDefault();
-                  router.push(item.href);
-                }}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors relative ${isActive
                     ? "bg-[var(--amber-ghost-bg)] text-[var(--amber)]"
                     : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
@@ -172,7 +166,7 @@ export default function Sidebar({
                     )}
                   </span>
                 )}
-              </Link>
+              </a>
             );
           })}
         </nav>
@@ -207,13 +201,9 @@ export default function Sidebar({
         {NAV_ITEMS.filter((item) => !item.mobileHidden).map((item) => {
           const isActive = pathname === item.href;
           return (
-            <Link
+            <a
               key={item.href}
               href={item.href}
-              onClick={(event) => {
-                event.preventDefault();
-                router.push(item.href);
-              }}
               className={`flex flex-col items-center gap-0.5 py-1.5 px-3 rounded-xl transition-colors ${isActive
                   ? "text-[var(--amber)]"
                   : "text-[var(--text-muted)]"
@@ -228,7 +218,7 @@ export default function Sidebar({
                 )}
               </span>
               <span className="text-[10px] font-medium">{item.label}</span>
-            </Link>
+            </a>
           );
         })}
         <button
