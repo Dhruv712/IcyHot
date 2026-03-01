@@ -30,6 +30,7 @@ const MarkdownEditor = dynamic(
 const AUTOSAVE_DELAY = 2_000;
 const FOCUS_MOUSE_IDLE = 2_000; // re-fade after mouse stops for 2s
 const FLOW_MODE_STORAGE_KEY = "journal-flow-mode-enabled";
+const FLOW_DEBUG_QUERY_PARAM = "flowDebug";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -84,6 +85,13 @@ export default function JournalPage() {
   const [sidebarMode, setSidebarMode] = useState<"entries" | "lab">("entries");
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
+  const [showFlowDebug] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      process.env.NODE_ENV !== "production" &&
+      new URLSearchParams(window.location.search).get(FLOW_DEBUG_QUERY_PARAM) === "1",
+  );
+  const [flowDebugSummary, setFlowDebugSummary] = useState("");
   const [flowMode, setFlowMode] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     const raw = localStorage.getItem(FLOW_MODE_STORAGE_KEY);
@@ -535,6 +543,26 @@ export default function JournalPage() {
     ? "relative max-w-[600px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-14"
     : "relative max-w-[760px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-16";
 
+  useEffect(() => {
+    if (!showFlowDebug || !flowMode) return;
+
+    const readDebug = () => {
+      const debug = editorRef.current?.getFlowDebugState();
+      if (!debug) {
+        setFlowDebugSummary("Flow: unavailable");
+        return;
+      }
+
+      setFlowDebugSummary(
+        `Flow: active ${debug.activeBlockIndex + 1}/${Math.max(debug.blockCount, 1)} · faded ${debug.fadedBlockCount} · ${debug.revealed ? "revealed" : "live"}`,
+      );
+    };
+
+    readDebug();
+    const interval = window.setInterval(readDebug, 300);
+    return () => window.clearInterval(interval);
+  }, [flowMode, showFlowDebug]);
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center bg-[var(--bg-base)]">
@@ -609,6 +637,12 @@ export default function JournalPage() {
                 ? "Margin: scanning..."
                 : `Margin: ${marginInspector.message}`}
             </span>
+
+            {showFlowDebug && flowMode && (
+              <span className="hidden md:inline text-[11px] text-[var(--text-muted)]">
+                {flowDebugSummary}
+              </span>
+            )}
 
             <button
               onClick={() => {

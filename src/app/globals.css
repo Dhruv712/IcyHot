@@ -124,6 +124,11 @@ body[data-journal-focus] nav.fixed {
   margin-top: 0.75em;
 }
 
+.journal-editor-content [data-flow-block="true"] {
+  transition: opacity 220ms ease, filter 220ms ease;
+  will-change: opacity, filter;
+}
+
 /* Placeholder */
 .journal-editor-content p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
