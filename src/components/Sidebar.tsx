@@ -104,15 +104,15 @@ export default function Sidebar({
         }`}
       >
         {/* Logo + collapse */}
-        <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border-subtle)]">
+        <div className="flex items-center justify-between px-4 py-5 border-b border-[var(--border-subtle)]">
           {!collapsed && (
             <Image
               src="/brand/lumos-wordmark.png"
               alt="Lumos"
-              width={220}
-              height={60}
+              width={250}
+              height={72}
               priority
-              className="h-10 w-auto"
+              className="h-12 w-auto"
             />
           )}
           <button
