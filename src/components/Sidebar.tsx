@@ -125,7 +125,7 @@ export default function Sidebar({
         </div>
 
         {/* Navigation */}
-        <nav className="py-3 px-2 space-y-1">
+        <nav className="relative z-10 flex-none py-3 px-2 space-y-1">
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.href;
             return (
@@ -168,7 +168,7 @@ export default function Sidebar({
           })}
         </nav>
 
-        <div className="flex-1 min-h-0">
+        <div className="relative z-0 flex-1 min-h-0 overflow-hidden">
           {showJournalRail && (
             <div className="h-full min-h-0 border-t border-[var(--border-subtle)]">
               {journalSidebarContent}
