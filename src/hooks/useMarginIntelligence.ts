@@ -88,9 +88,9 @@ function nudgeSignature(nudge: SparkNudge): string {
 function collapseStack(cards: SparkNudgeCard[]): SparkNudgeCard[] {
   if (cards.length === 0) return cards;
   const sorted = [...cards].sort((a, b) => a.createdAtMs - b.createdAtMs);
-  return sorted.map((card, idx) => ({
+  return sorted.map((card) => ({
     ...card,
-    collapsed: idx < sorted.length - 1,
+    collapsed: true,
   }));
 }
 
@@ -306,7 +306,7 @@ export function useMarginIntelligence({
     setNudges((prev) =>
       prev.map((nudge) => ({
         ...nudge,
-        collapsed: nudge.id === id ? false : nudge.collapsed,
+        collapsed: nudge.id === id ? !nudge.collapsed : true,
       })),
     );
   }, []);
@@ -417,7 +417,7 @@ export function useMarginIntelligence({
           const enriched = incomingNudges.map((nudge) => ({
             ...nudge,
             createdAtMs: Date.now(),
-            collapsed: false,
+            collapsed: true,
           }));
 
           for (const nudge of incomingNudges) {

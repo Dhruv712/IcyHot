@@ -26,10 +26,10 @@ function getMarkdown(editor: Editor): string {
   return (editor.storage as any).markdown.getMarkdown();
 }
 
-const FLOW_IDLE_REVEAL_MS = 3_500;
-const FLOW_FADE_START_MS = 12_000;
-const FLOW_FADE_FULL_MS = 24_000;
-const FLOW_MIN_OPACITY = 0.2;
+const FLOW_IDLE_REVEAL_MS = 4_500;
+const FLOW_FADE_START_MS = 8_000;
+const FLOW_FADE_FULL_MS = 18_000;
+const FLOW_MIN_OPACITY = 0.08;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -102,6 +102,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           block.style.opacity = "";
           block.style.transition = "";
           block.style.willChange = "";
+          block.style.filter = "";
         }
 
         emitFlowState({
@@ -134,11 +135,12 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
         let fadedCount = 0;
 
         blocks.forEach((block, index) => {
-          block.style.transition = "opacity 520ms ease";
-          block.style.willChange = "opacity";
+          block.style.transition = "opacity 380ms ease, filter 380ms ease";
+          block.style.willChange = "opacity, filter";
 
           if (!flowMode || revealed || index >= activeIndex) {
             block.style.opacity = "1";
+            block.style.filter = "none";
             return;
           }
 
@@ -150,11 +152,12 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           );
           const opacity = 1 - fadeProgress * (1 - FLOW_MIN_OPACITY);
 
-          if (fadeProgress > 0.02) {
+          if (fadeProgress > 0.24) {
             fadedCount += 1;
           }
 
           block.style.opacity = `${opacity}`;
+          block.style.filter = fadeProgress > 0.45 ? "saturate(0.78)" : "none";
         });
 
         emitFlowState({

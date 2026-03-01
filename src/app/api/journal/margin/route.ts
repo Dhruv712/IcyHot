@@ -162,9 +162,10 @@ Quality bar:
 - Concrete anchors (who/when/what) only.
 - No generic filler or therapy-speak.
 - No broad, obvious observations.
-- Hook must be one sentence, max 22 words.
-- whyNow should explain why this matters now.
-- actionPrompt should be one concrete next move.
+- Write like a sharp margin comment, not a coach paragraph.
+- hook: one sentence, max 14 words.
+- whyNow: one sentence, max 12 words.
+- actionPrompt: one concrete next move, max 9 words.
 - Evidence must map to a specific retrieved memory (date+snippet). Include evidenceMemoryId when possible.
 
 ${addendum}
@@ -239,10 +240,10 @@ function parseCandidateResponse(
   }
 
   const textFiltered = raw.filter((c) => {
-    const hook = safeText(c.hook, 220);
-    const whyNow = safeText(c.whyNow, 300);
-    const actionPrompt = safeText(c.actionPrompt, 300);
-    return hook.length >= 12 && whyNow.length >= 10 && actionPrompt.length >= 10;
+    const hook = safeText(c.hook, 140);
+    const whyNow = safeText(c.whyNow, 120);
+    const actionPrompt = safeText(c.actionPrompt, 90);
+    return hook.length >= 8 && whyNow.length >= 6 && actionPrompt.length >= 6;
   });
 
   if (textFiltered.length === 0) {
@@ -258,10 +259,10 @@ function parseCandidateResponse(
       normalizeCandidate(
         {
           ...c,
-          hook: safeText(c.hook, 220),
-          whyNow: safeText(c.whyNow, 300),
-          actionPrompt: safeText(c.actionPrompt, 300),
-          evidenceMemorySnippet: safeText(c.evidenceMemorySnippet, 180),
+          hook: safeText(c.hook, 140),
+          whyNow: safeText(c.whyNow, 120),
+          actionPrompt: safeText(c.actionPrompt, 90),
+          evidenceMemorySnippet: safeText(c.evidenceMemorySnippet, 120),
           evidenceMemoryDate: safeText(c.evidenceMemoryDate, 16),
           evidenceMemoryId: safeText(c.evidenceMemoryId, 64),
         },

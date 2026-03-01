@@ -43,7 +43,10 @@ export interface HistoricalNudge {
   hook: string;
 }
 
-const HOOK_MAX_WORDS = 22;
+const HOOK_MAX_WORDS = 14;
+const WHY_NOW_MAX_WORDS = 12;
+const ACTION_PROMPT_MAX_WORDS = 9;
+const EVIDENCE_MAX_WORDS = 18;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -90,10 +93,12 @@ export function normalizeCandidate(
   return {
     type: raw.type,
     hook: trimToWords(hook, HOOK_MAX_WORDS),
-    whyNow,
-    actionPrompt,
+    whyNow: trimToWords(whyNow, WHY_NOW_MAX_WORDS),
+    actionPrompt: trimToWords(actionPrompt, ACTION_PROMPT_MAX_WORDS),
     evidenceMemoryDate: raw.evidenceMemoryDate,
-    evidenceMemorySnippet: raw.evidenceMemorySnippet,
+    evidenceMemorySnippet: raw.evidenceMemorySnippet
+      ? trimToWords(raw.evidenceMemorySnippet, EVIDENCE_MAX_WORDS)
+      : raw.evidenceMemorySnippet,
     evidenceMemoryId: raw.evidenceMemoryId,
     modelConfidence: clamp(
       typeof raw.modelConfidence === "number" ? raw.modelConfidence : 0,

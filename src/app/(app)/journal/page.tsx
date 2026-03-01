@@ -10,10 +10,7 @@ import {
   type JournalEntryListItem,
 } from "@/hooks/useJournal";
 import dynamic from "next/dynamic";
-import type {
-  FlowModeState,
-  MarkdownEditorHandle,
-} from "@/components/journal/MarkdownEditor";
+import type { MarkdownEditorHandle } from "@/components/journal/MarkdownEditor";
 import { useMarginIntelligence } from "@/hooks/useMarginIntelligence";
 import MarginAnnotations from "@/components/journal/MarginAnnotations";
 import SparkCards from "@/components/journal/SparkCards";
@@ -43,6 +40,39 @@ function toLocalYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function ModeToggle({
+  label,
+  checked,
+  onToggle,
+}: {
+  label: string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onToggle}
+      className="inline-flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-card)] px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text-primary)]"
+    >
+      <span
+        className={`relative h-4 w-7 rounded-full transition-colors ${
+          checked ? "bg-[var(--amber)]" : "bg-[var(--border-medium)]"
+        }`}
+      >
+        <span
+          className={`absolute top-[2px] h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? "translate-x-3.5" : "translate-x-0.5"
+          }`}
+        />
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 export default function JournalPage() {
   const queryClient = useQueryClient();
 
@@ -58,13 +88,6 @@ export default function JournalPage() {
     if (typeof window === "undefined") return true;
     const raw = localStorage.getItem(FLOW_MODE_STORAGE_KEY);
     return raw === null ? true : raw === "true";
-  });
-  const [flowState, setFlowState] = useState<FlowModeState>({
-    modeEnabled: flowMode,
-    isWriting: false,
-    isRevealed: true,
-    fadedCount: 0,
-    activeIndex: 0,
   });
   const [marginTuning, setMarginTuning] = useState<MarginTuningSettings>(() => {
     if (typeof window === "undefined") return DEFAULT_MARGIN_TUNING;
@@ -369,26 +392,21 @@ export default function JournalPage() {
   const toggleFlowMode = useCallback(() => {
     if (flowMode) {
       handleRevealFlow();
-      setFlowState({
-        modeEnabled: false,
-        isWriting: false,
-        isRevealed: true,
-        fadedCount: 0,
-        activeIndex: 0,
-      });
       setFlowMode(false);
       return;
     }
 
     setFlowMode(true);
-    setFlowState({
-      modeEnabled: true,
-      isWriting: false,
-      isRevealed: true,
-      fadedCount: 0,
-      activeIndex: 0,
-    });
   }, [flowMode, handleRevealFlow]);
+
+  const toggleFocusMode = useCallback(() => {
+    setFocusMode((current) => {
+      if (current) {
+        setChromeHidden(false);
+      }
+      return !current;
+    });
+  }, []);
 
   // ── Cmd+S force-save ────────────────────────────────────────────────
   useEffect(() => {
@@ -512,20 +530,6 @@ export default function JournalPage() {
     </div>
   );
 
-  const flowHeadline = !flowMode
-    ? "Flow mode is off."
-    : flowState.isWriting
-      ? flowState.fadedCount > 0
-        ? `${flowState.fadedCount} earlier paragraph${flowState.fadedCount === 1 ? "" : "s"} now receding.`
-        : "Flow is active. Older paragraphs start fading after about 12 seconds."
-      : "Paused. Everything is visible again.";
-
-  const flowBody = !flowMode
-    ? "Write normally, or turn Flow on when you want less self-editing and more forward motion."
-    : flowState.isWriting
-      ? "Only writing above your current paragraph fades. If you stay in one long paragraph, nothing above it can recede yet."
-      : "Pause for a few seconds, select text, move the cursor upward, or hit Reveal and the full draft comes back.";
-
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center bg-[var(--bg-base)]">
@@ -569,7 +573,7 @@ export default function JournalPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {/* Save status */}
             <span
               className={`text-xs transition-opacity duration-300 ${
@@ -623,43 +627,10 @@ export default function JournalPage() {
               Lab
             </button>
 
-            {/* Focus mode toggle */}
-            <button
-              onClick={() => {
-                if (focusMode) {
-                  setChromeHidden(false);
-                }
-                setFocusMode(!focusMode);
-              }}
-              className={`transition-colors ${
-                focusMode
-                  ? "text-[var(--amber)] hover:text-[var(--amber-hover)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              }`}
-              title={focusMode ? "Exit focus mode" : "Focus mode"}
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                {focusMode ? (
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"
-                  />
-                ) : (
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
-                  />
-                )}
-              </svg>
-            </button>
+            <div className="hidden md:flex items-center gap-2">
+              <ModeToggle label="Flow" checked={flowMode} onToggle={toggleFlowMode} />
+              <ModeToggle label="Focus" checked={focusMode} onToggle={toggleFocusMode} />
+            </div>
           </div>
         </div>
 
@@ -667,7 +638,7 @@ export default function JournalPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           <div
             ref={setEditorContainer}
-            className="relative max-w-[680px] mx-auto px-6 pb-24 md:px-8"
+            className="relative max-w-[620px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-6 lg:ml-16"
           >
             <MarkdownEditor
               ref={editorRef}
@@ -677,7 +648,6 @@ export default function JournalPage() {
               onActiveParagraph={handleActiveParagraph}
               placeholder="Start writing..."
               flowMode={flowMode}
-              onFlowStateChange={setFlowState}
             />
             {sparkNudges.length > 0 ? (
               <SparkCards
@@ -697,60 +667,6 @@ export default function JournalPage() {
           </div>
         </div>
 
-        <div
-          className={`flex-shrink-0 px-5 pb-4 md:px-8 transition-opacity duration-500 ${
-            chromeHidden ? "opacity-20" : "opacity-100"
-          }`}
-        >
-          <div className="rounded-[24px] border border-[var(--border-subtle)] bg-[var(--bg-card)] px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.08)] md:px-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="min-w-0">
-                <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
-                  Flow
-                </div>
-                <p className="mt-1 text-sm text-[var(--text-primary)]">
-                  {flowHeadline}
-                </p>
-                <p className="mt-1 max-w-[620px] text-xs leading-relaxed text-[var(--text-secondary)]">
-                  {flowBody}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 md:flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={toggleFlowMode}
-                  role="switch"
-                  aria-checked={flowMode}
-                  className="inline-flex items-center gap-3 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 transition-colors hover:border-[var(--border-medium)]"
-                >
-                  <span
-                    className={`relative h-5 w-9 rounded-full transition-colors ${
-                      flowMode ? "bg-[var(--amber)]" : "bg-[var(--border-medium)]"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-[2px] h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                        flowMode ? "translate-x-4" : "translate-x-0.5"
-                      }`}
-                    />
-                  </span>
-                  <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-primary)]">
-                    Flow mode
-                  </span>
-                </button>
-
-                <button
-                  onClick={handleRevealFlow}
-                  disabled={!flowMode}
-                  className="rounded-full border border-[var(--border-subtle)] px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Reveal
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <aside

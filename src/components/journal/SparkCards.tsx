@@ -33,6 +33,16 @@ function typeLabel(type: SparkNudgeCard["type"]): string {
   return "Eyebrow";
 }
 
+function shortDate(value?: string): string {
+  if (!value) return "";
+  const parsed = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function SparkCards({
   nudges,
   editorElement,
@@ -65,7 +75,7 @@ export default function SparkCards({
 
     for (const { nudge, naturalTop } of sorted) {
       const cardEl = cardRefs.current.get(nudge.id);
-      const cardHeight = cardEl ? cardEl.offsetHeight : nudge.collapsed ? 34 : 176;
+      const cardHeight = cardEl ? cardEl.offsetHeight : nudge.collapsed ? 78 : 210;
       const resolvedTop = Math.max(naturalTop, prevBottom + CARD_GAP);
       newPositions.set(nudge.id, resolvedTop);
       prevBottom = resolvedTop + cardHeight;
@@ -116,13 +126,19 @@ export default function SparkCards({
                 if (el) cardRefs.current.set(nudge.id, el);
                 else cardRefs.current.delete(nudge.id);
               }}
-              className="spark-chip"
+              className={`spark-chip spark-chip--${nudge.type}`}
               style={{ top }}
               onClick={() => onExpand(nudge.id)}
-              title="Expand spark"
+              title="Open comment"
             >
-              <span className="spark-chip__type">{typeLabel(nudge.type)}</span>
-              <span className="spark-chip__hook">{nudge.hook}</span>
+              <span className="spark-chip__rail" />
+              <span className="spark-chip__body">
+                <span className="spark-chip__hook">{nudge.hook}</span>
+                <span className="spark-chip__meta">
+                  {typeLabel(nudge.type)}
+                  {nudge.evidenceMemoryDate ? ` · ${shortDate(nudge.evidenceMemoryDate)}` : ""}
+                </span>
+              </span>
             </button>
           );
         }
@@ -138,30 +154,37 @@ export default function SparkCards({
             style={{ top }}
           >
             <button
-              className="spark-card__dismiss"
-              onClick={() => onDismiss(nudge.id)}
-              aria-label="Dismiss spark"
+              className="spark-card__collapse"
+              onClick={() => onExpand(nudge.id)}
+              aria-label="Collapse comment"
             >
-              ×
+              −
             </button>
 
-            <div className="spark-card__type">{typeLabel(nudge.type)}</div>
+            <div className="spark-card__type">
+              {typeLabel(nudge.type)}
+              {nudge.evidenceMemoryDate ? ` · ${shortDate(nudge.evidenceMemoryDate)}` : ""}
+            </div>
             <p className="spark-card__hook">{nudge.hook}</p>
 
-            <div className="spark-card__row">
-              <div className="spark-card__label">Why now</div>
+            <div className="spark-card__detail">
+              <div className="spark-card__label">Why</div>
               <div className="spark-card__text">{nudge.whyNow}</div>
             </div>
 
-            <div className="spark-card__row">
-              <div className="spark-card__label">Evidence</div>
+            <div className="spark-card__detail">
+              <div className="spark-card__label">Memory</div>
               <div className="spark-card__text">
-                {nudge.evidenceMemoryDate ? `${nudge.evidenceMemoryDate} · ` : ""}
                 {nudge.evidenceMemorySnippet || "Memory link"}
               </div>
             </div>
 
-            <div className="spark-card__action">{nudge.actionPrompt}</div>
+            <div className="spark-card__detail spark-card__detail--ask">
+              <div className="spark-card__label">Ask</div>
+              <div className="spark-card__text spark-card__text--strong">
+                {nudge.actionPrompt}
+              </div>
+            </div>
 
             <div className="spark-card__controls">
               <button
@@ -191,14 +214,14 @@ export default function SparkCards({
                 onClick={() => setRevisitId(nudge.id)}
                 disabled={nudge.feedbackPending}
               >
-                Revisit
+                Open
               </button>
               <button
                 className="spark-btn"
                 onClick={() => onDismiss(nudge.id)}
                 disabled={nudge.feedbackPending}
               >
-                Dismiss
+                Hide
               </button>
             </div>
 
