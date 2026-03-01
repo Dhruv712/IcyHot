@@ -4,7 +4,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
-export const FLOW_FADE_START_MS = 8_000;
+export const FLOW_FADE_START_MS = 4_000;
 export const FLOW_FADE_FULL_MS = 18_000;
 export const FLOW_IDLE_REVEAL_MS = 4_500;
 export const FLOW_MIN_OPACITY = 0.1;
@@ -379,9 +379,7 @@ export const FlowModeExtension = Extension.create<{ enabled: boolean }>({
             }
 
             if (tr.selectionSet) {
-              const movedUpward =
-                activeBlockIndex < previous.activeBlockIndex ||
-                newState.selection.from < previous.lastSelectionFrom;
+              const movedUpward = activeBlockIndex < previous.activeBlockIndex;
               const hasSelection = newState.selection.from !== newState.selection.to;
 
               if (hasSelection || movedUpward) {
