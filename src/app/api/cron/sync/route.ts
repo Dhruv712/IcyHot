@@ -112,6 +112,8 @@ export async function GET(request: NextRequest) {
       result.consolidation = { success: true };
       result.overnightPush = { success: true, sent: 0, skipped: "No new content" };
     } else {
+      const runStartedAt = new Date();
+
       // Memory extraction (parallel system — failures don't block briefing)
       try {
         await processMemories(user.id);
@@ -126,7 +128,6 @@ export async function GET(request: NextRequest) {
 
       // Memory consolidation — discover connections + implications (failures don't block briefing)
       try {
-        const runStartedAt = new Date();
         const consolidation = await consolidateMemories(user.id);
         const runCompletedAt = new Date();
         const digest = await createConsolidationDigest({

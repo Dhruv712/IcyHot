@@ -37,7 +37,15 @@ export interface ConsolidationImplicationDetail {
   timestamp: string;
 }
 
+export interface ConsolidationMemoryDetail {
+  id: string;
+  content: string;
+  sourceDate: string;
+  timestamp: string;
+}
+
 export interface ConsolidationDigestDetails {
+  createdMemories: ConsolidationMemoryDetail[];
   createdConnections: ConsolidationConnectionDetail[];
   strengthenedConnections: ConsolidationConnectionDetail[];
   createdImplications: ConsolidationImplicationDetail[];
@@ -73,9 +81,12 @@ function shortSnippet(text: string | null, maxLen = 160): string {
   return `${clean.slice(0, maxLen - 3)}...`;
 }
 
-function buildSummary(counts: ConsolidationCounts): string {
+function buildSummary(counts: ConsolidationCounts, createdMemoryCount: number): string {
   const parts: string[] = [];
 
+  if (createdMemoryCount > 0) {
+    parts.push(`${createdMemoryCount} new memor${createdMemoryCount === 1 ? "y" : "ies"}`);
+  }
   if (counts.connectionsCreated > 0) {
     parts.push(`${counts.connectionsCreated} new connection${counts.connectionsCreated === 1 ? "" : "s"}`);
   }
@@ -93,7 +104,7 @@ function buildSummary(counts: ConsolidationCounts): string {
     if (counts.implicationsFiltered > 0) {
       return `Consolidation ran, but ${counts.implicationsFiltered} low-utility implication${counts.implicationsFiltered === 1 ? " was" : "s were"} filtered.`;
     }
-    return "Consolidation ran, but no new high-signal connections or implications were added.";
+    return "Consolidation ran, but no new high-signal memories, connections, or implications were added.";
   }
 
   return `Overnight graph update: ${parts.join(", ")}.`;
@@ -198,6 +209,38 @@ async function gatherConnectionDetails(userId: string, runStartedAt: Date, runCo
     createdConnections: createdRows.map((row) => mapConnection(row, row.createdAt)),
     strengthenedConnections: strengthenedRows.map((row) => mapConnection(row, row.lastCoActivatedAt)),
   };
+}
+
+async function gatherCreatedMemoryDetails(
+  userId: string,
+  runStartedAt: Date,
+  runCompletedAt: Date,
+): Promise<ConsolidationMemoryDetail[]> {
+  const rows = await db
+    .select({
+      id: memories.id,
+      content: memories.content,
+      sourceDate: memories.sourceDate,
+      createdAt: memories.createdAt,
+    })
+    .from(memories)
+    .where(
+      and(
+        eq(memories.userId, userId),
+        eq(memories.source, "journal"),
+        gte(memories.createdAt, runStartedAt),
+        lte(memories.createdAt, runCompletedAt),
+      ),
+    )
+    .orderBy(desc(memories.createdAt))
+    .limit(24);
+
+  return rows.map((row) => ({
+    id: row.id,
+    content: shortSnippet(row.content, 220),
+    sourceDate: row.sourceDate,
+    timestamp: row.createdAt.toISOString(),
+  }));
 }
 
 async function gatherImplicationDetails(userId: string, runStartedAt: Date, runCompletedAt: Date): Promise<{
@@ -319,6 +362,7 @@ function toDigestRecord(row: {
   createdAt: Date;
 }): ConsolidationDigestRecord {
   const details = safeParseJson<ConsolidationDigestDetails>(row.details, {
+    createdMemories: [],
     createdConnections: [],
     strengthenedConnections: [],
     createdImplications: [],
@@ -344,6 +388,7 @@ function toDigestRecord(row: {
     counts,
     summary: row.summary,
     changeCount:
+      details.createdMemories.length +
       counts.connectionsCreated +
       counts.connectionsStrengthened +
       counts.implicationsCreated +
@@ -358,19 +403,21 @@ export async function createConsolidationDigest(
 ): Promise<ConsolidationDigestRecord> {
   const { userId, digestDate, timeZone, runStartedAt, runCompletedAt, counts } = options;
 
-  const [connectionDetails, implicationDetails] = await Promise.all([
+  const [createdMemories, connectionDetails, implicationDetails] = await Promise.all([
+    gatherCreatedMemoryDetails(userId, runStartedAt, runCompletedAt),
     gatherConnectionDetails(userId, runStartedAt, runCompletedAt),
     gatherImplicationDetails(userId, runStartedAt, runCompletedAt),
   ]);
 
   const details: ConsolidationDigestDetails = {
+    createdMemories,
     createdConnections: connectionDetails.createdConnections,
     strengthenedConnections: connectionDetails.strengthenedConnections,
     createdImplications: implicationDetails.createdImplications,
     reinforcedImplications: implicationDetails.reinforcedImplications,
   };
 
-  const summary = buildSummary(counts);
+  const summary = buildSummary(counts, createdMemories.length);
 
   const [row] = await db
     .insert(consolidationDigests)

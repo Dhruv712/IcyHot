@@ -61,6 +61,7 @@ export default function OvernightView() {
 
   const createdConnections = digest.details.createdConnections ?? [];
   const strengthenedConnections = digest.details.strengthenedConnections ?? [];
+  const createdMemories = digest.details.createdMemories ?? [];
   const createdImplications = digest.details.createdImplications ?? [];
   const reinforcedImplications = digest.details.reinforcedImplications ?? [];
 
@@ -82,12 +83,26 @@ export default function OvernightView() {
 
       <BriefingSection title="What changed" icon="✨">
         <div className="grid grid-cols-2 gap-2">
+          <Stat label="New memories" value={createdMemories.length} />
           <Stat label="New links" value={digest.counts.connectionsCreated} />
           <Stat label="Stronger links" value={digest.counts.connectionsStrengthened} />
           <Stat label="New insights" value={digest.counts.implicationsCreated} />
           <Stat label="Reinforced" value={digest.counts.implicationsReinforced} />
         </div>
       </BriefingSection>
+
+      {createdMemories.length > 0 && (
+        <BriefingSection title="New memories" icon="📝">
+          <div className="space-y-3">
+            {createdMemories.map((memory) => (
+              <div key={memory.id} className="bg-[var(--bg-elevated)] rounded-xl px-4 py-3">
+                <p className="text-sm text-[var(--text-primary)] leading-relaxed">{memory.content}</p>
+                <p className="mt-2 text-xs text-[var(--text-muted)]">{memory.sourceDate}</p>
+              </div>
+            ))}
+          </div>
+        </BriefingSection>
+      )}
 
       {createdImplications.length > 0 && (
         <BriefingSection title="New implications" icon="🧠">
