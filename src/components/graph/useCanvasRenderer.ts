@@ -92,7 +92,7 @@ export function useCanvasRenderer({
     ctx.clearRect(0, 0, width, height);
 
     // Dark background — warm undertone
-    ctx.fillStyle = "#0a0a0f";
+    ctx.fillStyle = "#191919";
     ctx.fillRect(0, 0, width, height);
 
     // Subtle warm amber radial gradient from center
