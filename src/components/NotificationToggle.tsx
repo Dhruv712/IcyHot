@@ -156,15 +156,30 @@ export default function NotificationToggle({
       <button
         onClick={toggle}
         disabled={loading}
-        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
-          enabled
-            ? "border-[var(--amber)] bg-[var(--amber-ghost-bg)] text-[var(--amber)] hover:border-[var(--amber-hover)]"
-            : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text-secondary)]"
-        }`}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text-secondary)] disabled:opacity-50"
         title={error || (enabled ? "Notifications on" : "Notifications off")}
         aria-label={enabled ? "Disable notifications" : "Enable notifications"}
       >
-        <span className="text-base">{enabled ? "\uD83D\uDD14" : "\uD83D\uDD15"}</span>
+        <svg
+          className="h-4.5 w-4.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0018 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 00-2.312 6.022c1.733.64 3.57 1.08 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
+          />
+          {!enabled && (
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M5 5l14 14"
+            />
+          )}
+        </svg>
       </button>
     );
   }

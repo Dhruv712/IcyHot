@@ -7,7 +7,6 @@ import { useJournalSidebar } from "./JournalSidebarContext";
 
 interface SidebarProps {
   driftingCount: number;
-  onAddPerson: () => void;
 }
 
 const NAV_ITEMS = [
@@ -87,7 +86,6 @@ const NAV_ITEMS = [
 
 export default function Sidebar({
   driftingCount,
-  onAddPerson,
 }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -178,22 +176,6 @@ export default function Sidebar({
             </div>
           )}
         </div>
-
-        {/* Actions */}
-        <div className="px-2 py-3 border-t border-[var(--border-subtle)]">
-          {/* Add Person */}
-          <button
-            onClick={onAddPerson}
-            className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[var(--amber)] hover:bg-[var(--amber-ghost-bg)] transition-colors w-full ${collapsed ? "justify-center" : ""
-              }`}
-            title={collapsed ? "Add Person" : undefined}
-          >
-            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            {!collapsed && <span className="text-sm font-medium">Add Person</span>}
-          </button>
-        </div>
       </aside>
 
       {/* ── Mobile Bottom Nav ───────────────────────────────────── */}
@@ -221,15 +203,6 @@ export default function Sidebar({
             </a>
           );
         })}
-        <button
-          onClick={onAddPerson}
-          className="flex flex-col items-center gap-0.5 py-1.5 px-3 rounded-xl text-[var(--amber)] transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          <span className="text-[10px] font-medium">Add</span>
-        </button>
       </nav>
     </>
   );

@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
-import AddContactDialog from "@/components/AddContactDialog";
 import JournalSidebarProvider from "@/components/JournalSidebarContext";
 import { useGraphData } from "@/hooks/useGraphData";
 import NotificationToggle from "@/components/NotificationToggle";
@@ -14,7 +13,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
   const { data: graphData } = useGraphData();
-  const [showAddDialog, setShowAddDialog] = useState(false);
   const { resolved, setTheme } = useTheme();
   const showShellUtilities = pathname !== "/journal";
 
@@ -86,7 +84,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="h-screen w-screen flex flex-col md:flex-row overflow-hidden">
         <Sidebar
           driftingCount={driftingCount}
-          onAddPerson={() => setShowAddDialog(true)}
         />
 
         {/* Main content area */}
@@ -116,11 +113,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {children}
         </main>
-
-        {/* Global modals */}
-        {showAddDialog && (
-          <AddContactDialog onClose={() => setShowAddDialog(false)} />
-        )}
       </div>
     </JournalSidebarProvider>
   );

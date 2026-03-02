@@ -130,7 +130,6 @@ function setEditorDocFromJson(editor: Editor, contentJson: JournalRichTextNode) 
   try {
     const nextDoc = editor.schema.nodeFromJSON(contentJson);
     const tr = editor.state.tr.replaceWith(0, editor.state.doc.content.size, nextDoc.content);
-    tr.setSelection(TextSelection.atEnd(tr.doc));
     editor.view.dispatch(tr);
   } catch (error) {
     console.error("[journal-editor] Failed to load structured content:", error);
@@ -465,15 +464,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
         clearFlowTimers();
       }
     }, [clearFlowTimers, editor, flowMode, syncFlowTimers]);
-
-    useEffect(() => {
-      if (editor) {
-        setTimeout(() => {
-          editor.commands.focus("end");
-          syncFloatingUi(editor);
-        }, 50);
-      }
-    }, [editor, syncFloatingUi]);
 
     useEffect(() => () => clearFlowTimers(), [clearFlowTimers]);
 
