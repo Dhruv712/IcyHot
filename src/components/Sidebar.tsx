@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useJournalSidebar } from "./JournalSidebarContext";
+import { useTheme } from "./ThemeProvider";
 
 interface SidebarProps {
   driftingCount: number;
@@ -90,7 +91,12 @@ export default function Sidebar({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { content: journalSidebarContent } = useJournalSidebar();
+  const { resolved } = useTheme();
   const showJournalRail = pathname === "/journal" && !collapsed && journalSidebarContent;
+  const logoSrc =
+    resolved === "dark"
+      ? "/brand/Lumos Logo dark mode.png"
+      : "/brand/lumos-wordmark.png";
 
   return (
     <>
@@ -103,7 +109,7 @@ export default function Sidebar({
         <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--border-subtle)]">
           {!collapsed && (
             <Image
-              src="/brand/lumos-wordmark.png"
+              src={logoSrc}
               alt="Lumos"
               width={270}
               height={76}
