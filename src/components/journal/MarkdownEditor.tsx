@@ -125,16 +125,6 @@ function getMentionQuery(editor: Editor): { from: number; to: number; query: str
   };
 }
 
-function setEditorDocFromJson(editor: Editor, contentJson: JournalRichTextNode) {
-  try {
-    const nextDoc = editor.schema.nodeFromJSON(contentJson);
-    const tr = editor.state.tr.replaceWith(0, editor.state.doc.content.size, nextDoc.content);
-    editor.view.dispatch(tr);
-  } catch (error) {
-    console.error("[journal-editor] Failed to load structured content:", error);
-  }
-}
-
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
   function MarkdownEditor(
     {
@@ -288,7 +278,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           enabled: flowMode,
         }),
       ],
-      content: initialContent,
+      content: initialContentJson ?? initialContent,
       editorProps: {
         attributes: {
           class: "journal-editor-content",
@@ -406,34 +396,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
       mentionStateRef.current = mentionState;
       mentionOptionsRef.current = mentionOptions;
     }, [mentionOptions, mentionState]);
-
-    useEffect(() => {
-      if (!editor) return;
-
-      const desiredJson = initialContentJson && typeof initialContentJson === "object"
-        ? initialContentJson
-        : null;
-
-      if (desiredJson) {
-        const currentJson = JSON.stringify(editor.getJSON());
-        const nextJson = JSON.stringify(desiredJson);
-        if (currentJson !== nextJson) {
-          setEditorDocFromJson(editor, desiredJson);
-          editor.commands.flowReveal();
-          clearFlowTimers();
-          requestAnimationFrame(() => syncFloatingUi(editor));
-        }
-        return;
-      }
-
-      const currentMd = getMarkdown(editor);
-      if (currentMd !== initialContent) {
-        editor.commands.setContent(initialContent);
-        editor.commands.flowReveal();
-        clearFlowTimers();
-        requestAnimationFrame(() => syncFloatingUi(editor));
-      }
-    }, [clearFlowTimers, editor, initialContent, initialContentJson, syncFloatingUi]);
 
     useEffect(() => {
       if (!editor) return;
