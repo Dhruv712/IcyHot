@@ -179,6 +179,7 @@ export default function JournalPage() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [reminderDraft, setReminderDraft] = useState<ReminderDraft | null>(null);
   const [liveWordCount, setLiveWordCount] = useState<{ entryDate: string; count: number } | null>(null);
+  const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(0);
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -318,6 +319,38 @@ export default function JournalPage() {
   useEffect(() => {
     scrollRef.current?.scrollTo(0, 0);
   }, [entryDate]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const syncSidebarWidth = () => {
+      if (window.innerWidth < 768) {
+        setDesktopSidebarWidth(0);
+        return;
+      }
+
+      const sidebar = document.querySelector<HTMLElement>('[data-app-sidebar="desktop"]');
+      setDesktopSidebarWidth(sidebar?.getBoundingClientRect().width ?? 0);
+    };
+
+    syncSidebarWidth();
+
+    const sidebar = document.querySelector<HTMLElement>('[data-app-sidebar="desktop"]');
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" && sidebar
+        ? new ResizeObserver(() => syncSidebarWidth())
+        : null;
+
+    if (resizeObserver && sidebar) {
+      resizeObserver.observe(sidebar);
+    }
+    window.addEventListener("resize", syncSidebarWidth);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", syncSidebarWidth);
+    };
+  }, []);
 
   // ── Focus mode: keydown on editor container ─────────────────────────
   // Uses a direct DOM listener so it doesn't depend on Tiptap's stale closures
@@ -699,11 +732,15 @@ export default function JournalPage() {
 
   const compactMarginNotes = false;
   const editorLayoutClass =
-    "relative max-w-[820px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-8 lg:ml-16";
+    "relative max-w-[820px] mx-auto px-6 pb-24 md:px-8";
   const displayedWordCount =
     liveWordCount?.entryDate === entryDate
       ? liveWordCount.count
       : countWords(entry?.content ?? "");
+  const editorLayoutStyle =
+    desktopSidebarWidth > 0
+      ? { transform: `translateX(-${desktopSidebarWidth / 2}px)` }
+      : undefined;
   const desktopJournalRailContent = useMemo(
     () => renderJournalRail("desktop"),
     [renderJournalRail],
@@ -847,6 +884,7 @@ export default function JournalPage() {
           <div
             ref={setEditorContainer}
             className={editorLayoutClass}
+            style={editorLayoutStyle}
           >
             <MarkdownEditor
               ref={editorRef}
