@@ -74,6 +74,10 @@ function toNoonIso(dateOnly: string): string {
   return new Date(`${dateOnly}T12:00:00`).toISOString();
 }
 
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
 function ModeToggle({
   label,
   checked,
@@ -174,6 +178,7 @@ export default function JournalPage() {
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [reminderDraft, setReminderDraft] = useState<ReminderDraft | null>(null);
+  const [liveWordCount, setLiveWordCount] = useState<{ entryDate: string; count: number } | null>(null);
 
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -416,9 +421,13 @@ export default function JournalPage() {
 
   // ── Schedule autosave on change ─────────────────────────────────────
   const handleEditorChange = useCallback(
-    () => {
+    (payload: { markdown: string }) => {
       isDirtyRef.current = true;
       setSaveStatus("idle");
+      setLiveWordCount({
+        entryDate: entryDateRef.current,
+        count: countWords(payload.markdown),
+      });
 
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = setTimeout(() => {
@@ -691,6 +700,10 @@ export default function JournalPage() {
   const compactMarginNotes = false;
   const editorLayoutClass =
     "relative max-w-[820px] mx-auto px-6 pb-24 md:mx-0 md:ml-10 md:px-8 lg:ml-16";
+  const displayedWordCount =
+    liveWordCount?.entryDate === entryDate
+      ? liveWordCount.count
+      : countWords(entry?.content ?? "");
   const desktopJournalRailContent = useMemo(
     () => renderJournalRail("desktop"),
     [renderJournalRail],
@@ -794,6 +807,10 @@ export default function JournalPage() {
               {marginInspector.phase === "querying"
                 ? "Margin: scanning..."
                 : `Margin: ${marginInspector.message}`}
+            </span>
+
+            <span className="text-[11px] text-[var(--text-muted)]">
+              {displayedWordCount} {displayedWordCount === 1 ? "word" : "words"}
             </span>
 
             {showFlowDebug && flowMode && (
