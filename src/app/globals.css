@@ -113,7 +113,7 @@ body[data-journal-focus] nav.fixed {
 
 .journal-editor-content {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.125rem;
+  font-size: 1.1875rem;
   line-height: 1.8;
   color: var(--text-primary);
   outline: none;

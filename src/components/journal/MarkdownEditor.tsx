@@ -18,7 +18,6 @@ import { Fragment } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import {
   FlowModeExtension,
-  FLOW_IDLE_REVEAL_MS,
   FLOW_TICK_MS,
   getFlowDebugState,
   type FlowDebugState,
@@ -151,7 +150,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
     ref,
   ) {
     const flowTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const idleRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const wrapperRef = useRef<HTMLDivElement | null>(null);
     const editorInstanceRef = useRef<Editor | null>(null);
     const mentionStateRef = useRef<FloatingMentionState | null>(null);
@@ -186,14 +184,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
         clearInterval(flowTickRef.current);
         flowTickRef.current = null;
       }
-      if (idleRevealTimerRef.current) {
-        clearTimeout(idleRevealTimerRef.current);
-        idleRevealTimerRef.current = null;
-      }
     }, []);
 
     const syncFlowTimers = useCallback(
-      (editor: Editor | null, armIdleReveal: boolean) => {
+      (editor: Editor | null) => {
         if (!editor || !flowMode) {
           clearFlowTimers();
           return;
@@ -209,16 +203,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           flowTickRef.current = setInterval(() => {
             editor.commands.flowTick();
           }, FLOW_TICK_MS);
-        }
-
-        if (armIdleReveal) {
-          if (idleRevealTimerRef.current) {
-            clearTimeout(idleRevealTimerRef.current);
-          }
-          idleRevealTimerRef.current = setTimeout(() => {
-            editor.commands.flowReveal();
-            clearFlowTimers();
-          }, FLOW_IDLE_REVEAL_MS);
         }
       },
       [clearFlowTimers, flowMode],
@@ -346,10 +330,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
             });
             if (!mentionNode) return true;
 
-            const fragment = Fragment.fromArray([
-              mentionNode,
-              activeEditor.schema.text(" "),
-            ]);
+            const fragment = Fragment.from(mentionNode);
             const tr = activeEditor.state.tr.replaceWith(
               activeMentionState.from,
               activeMentionState.to,
@@ -393,11 +374,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           }
         }
 
-        syncFlowTimers(editor, true);
+        syncFlowTimers(editor);
         syncFloatingUi(editor);
       },
       onSelectionUpdate: ({ editor }) => {
-        syncFlowTimers(editor, false);
+        syncFlowTimers(editor);
         syncFloatingUi(editor);
       },
     });
@@ -458,7 +439,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
       if (!editor) return;
 
       editor.commands.flowSetEnabled(flowMode);
-      syncFlowTimers(editor, false);
+      syncFlowTimers(editor);
 
       if (!flowMode) {
         clearFlowTimers();
@@ -524,10 +505,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
                     });
                     if (!mentionNode) return;
 
-                    const fragment = Fragment.fromArray([
-                      mentionNode,
-                      editor.schema.text(" "),
-                    ]);
+                    const fragment = Fragment.from(mentionNode);
                     const activeMentionState = mentionStateRef.current;
                     const tr = editor.state.tr.replaceWith(
                       activeMentionState.from,
