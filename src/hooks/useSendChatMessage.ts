@@ -1,19 +1,11 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ChatStreamEvent, ChatThreadSummary } from "@/lib/chat/types";
+import type { ChatStreamEvent, ChatThread, ChatThreadSummary } from "@/lib/chat/types";
 import type { ChatThreadPayload } from "./useChatThread";
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function withThreadMessage(
-  existing: ChatThreadPayload | undefined,
-  updater: (payload: ChatThreadPayload) => ChatThreadPayload,
-): ChatThreadPayload | undefined {
-  if (!existing) return existing;
-  return updater(existing);
 }
 
 function applyThreadPreview(
@@ -37,12 +29,11 @@ function applyThreadPreview(
   };
 }
 
-export function useSendChatMessage(threadId?: string) {
+export function useSendChatMessage() {
   const queryClient = useQueryClient();
 
-  return useMutation<void, Error, { content: string }>({
-    mutationFn: async ({ content }) => {
-      if (!threadId) throw new Error("No thread selected");
+  return useMutation<void, Error, { threadId: string; content: string; thread?: ChatThread }>({
+    mutationFn: async ({ threadId, content, thread }) => {
 
       const trimmed = content.trim();
       if (!trimmed) return;
@@ -54,7 +45,18 @@ export function useSendChatMessage(threadId?: string) {
         queryClient.setQueryData<ChatThreadPayload | undefined>(
           ["chat-thread", threadId],
           (existing) => {
-            if (!existing) return existing;
+            if (!existing) {
+              return {
+                thread: thread ?? {
+                  id: threadId,
+                  title: "New chat",
+                  createdAt,
+                  updatedAt: createdAt,
+                  lastMessageAt: createdAt,
+                },
+                messages: [],
+              };
+            }
             return {
               ...existing,
               messages: existing.messages.map((entry) =>
@@ -73,11 +75,23 @@ export function useSendChatMessage(threadId?: string) {
 
       queryClient.setQueryData<ChatThreadPayload | undefined>(
         ["chat-thread", threadId],
-        (existing) =>
-          withThreadMessage(existing, (payload) => ({
-            ...payload,
+        (existing) => {
+          const base: ChatThreadPayload =
+            existing ?? {
+              thread: thread ?? {
+                id: threadId,
+                title: "New chat",
+                createdAt,
+                updatedAt: createdAt,
+                lastMessageAt: createdAt,
+              },
+              messages: [],
+            };
+
+          return {
+            ...base,
             messages: [
-              ...payload.messages,
+              ...base.messages,
               {
                 id: tempUserId,
                 threadId,
@@ -103,7 +117,8 @@ export function useSendChatMessage(threadId?: string) {
                 createdAt,
               },
             ],
-          })),
+          };
+        },
       );
 
       queryClient.setQueryData<{ threads: ChatThreadSummary[] } | undefined>(
@@ -242,8 +257,8 @@ export function useSendChatMessage(threadId?: string) {
       queryClient.invalidateQueries({ queryKey: ["chat-thread", threadId] });
       queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
     },
-    onError: (error) => {
-      if (!threadId) return;
+    onError: (error, variables) => {
+      const threadId = variables.threadId;
       queryClient.invalidateQueries({ queryKey: ["chat-thread", threadId] });
       queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
       console.error("[chat] send failed:", error);

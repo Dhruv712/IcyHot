@@ -16,7 +16,6 @@ export default function ChatPage() {
   const selectedThreadId = searchParams.get("thread") ?? undefined;
   const [showMobileThreads, setShowMobileThreads] = useState(false);
   const autoCreatedRef = useRef(false);
-  const pendingFirstMessageRef = useRef<string | null>(null);
 
   const { data: threadsData, isLoading: threadsLoading } = useChatThreads();
   const createThread = useCreateChatThread();
@@ -39,23 +38,13 @@ export default function ChatPage() {
   }, [createThread, router, selectedThreadId, threads, threadsLoading]);
 
   const { data: threadData, isLoading: threadLoading } = useChatThread(selectedThreadId);
-  const sendMessage = useSendChatMessage(selectedThreadId);
+  const sendMessage = useSendChatMessage();
 
   const activeTitle = (() => {
     if (threadData?.thread.title) return threadData.thread.title;
     if (selectedThreadId) return "Chat";
     return "Memory chat";
   })();
-
-  useEffect(() => {
-    if (!selectedThreadId || !pendingFirstMessageRef.current || sendMessage.isPending) {
-      return;
-    }
-
-    const content = pendingFirstMessageRef.current;
-    pendingFirstMessageRef.current = null;
-    void sendMessage.mutateAsync({ content });
-  }, [selectedThreadId, sendMessage]);
 
   const handleCreateThread = async () => {
     const result = await createThread.mutateAsync();
@@ -128,12 +117,16 @@ export default function ChatPage() {
                   disabled={sendMessage.isPending || createThread.isPending}
                   onSend={async (content) => {
                     if (!selectedThreadId) {
-                      pendingFirstMessageRef.current = content;
                       const result = await createThread.mutateAsync();
                       router.push(`/chat?thread=${result.thread.id}`);
+                      await sendMessage.mutateAsync({
+                        threadId: result.thread.id,
+                        thread: result.thread,
+                        content,
+                      });
                       return;
                     }
-                    await sendMessage.mutateAsync({ content });
+                    await sendMessage.mutateAsync({ threadId: selectedThreadId, content });
                   }}
                 />
               </>
