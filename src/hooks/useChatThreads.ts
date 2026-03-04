@@ -3,12 +3,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatThread, ChatThreadSummary } from "@/lib/chat/types";
 
+async function readApiError(res: Response, fallback: string): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (!text) return fallback;
+
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    return parsed.error || fallback;
+  } catch {
+    return text.slice(0, 200) || fallback;
+  }
+}
+
 export function useChatThreads() {
   return useQuery<{ threads: ChatThreadSummary[] }>({
     queryKey: ["chat-threads"],
     queryFn: async () => {
       const res = await fetch("/api/chat/threads");
-      if (!res.ok) throw new Error("Failed to fetch chat threads");
+      if (!res.ok) throw new Error(await readApiError(res, "Failed to fetch chat threads"));
       return res.json();
     },
     staleTime: 15 * 1000,
@@ -21,7 +33,9 @@ export function useCreateChatThread() {
   return useMutation<{ thread: ChatThread }>({
     mutationFn: async () => {
       const res = await fetch("/api/chat/threads", { method: "POST" });
-      if (!res.ok) throw new Error("Failed to create chat thread");
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Failed to create chat thread"));
+      }
       return res.json();
     },
     onSuccess: () => {

@@ -5,17 +5,19 @@ import { useState } from "react";
 export default function ChatComposer({
   onSend,
   disabled = false,
+  error,
 }: {
   onSend: (content: string) => Promise<void> | void;
   disabled?: boolean;
+  error?: string | null;
 }) {
   const [value, setValue] = useState("");
 
   const submit = async () => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    setValue("");
     await onSend(trimmed);
+    setValue("");
   };
 
   return (
@@ -44,6 +46,9 @@ export default function ChatComposer({
           Send
         </button>
       </div>
+      {error && (
+        <p className="mx-auto mt-2 max-w-4xl px-2 text-sm text-[var(--danger)]">{error}</p>
+      )}
     </div>
   );
 }

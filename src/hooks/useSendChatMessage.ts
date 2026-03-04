@@ -8,6 +8,18 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+async function readApiError(res: Response, fallback: string): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (!text) return fallback;
+
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    return parsed.error || fallback;
+  } catch {
+    return text.slice(0, 200) || fallback;
+  }
+}
+
 function applyThreadPreview(
   threads: { threads: ChatThreadSummary[] } | undefined,
   threadId: string,
@@ -133,8 +145,7 @@ export function useSendChatMessage() {
       });
 
       if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
-        const errorMessage = data.error || "Failed to send chat message";
+        const errorMessage = await readApiError(res, "Failed to send chat message");
         markAssistantError(errorMessage);
         throw new Error(errorMessage);
       }

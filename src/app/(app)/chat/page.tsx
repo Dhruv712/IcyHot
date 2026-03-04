@@ -17,7 +17,11 @@ export default function ChatPage() {
   const [showMobileThreads, setShowMobileThreads] = useState(false);
   const autoCreatedRef = useRef(false);
 
-  const { data: threadsData, isLoading: threadsLoading } = useChatThreads();
+  const {
+    data: threadsData,
+    isLoading: threadsLoading,
+    error: threadsQueryError,
+  } = useChatThreads();
   const createThread = useCreateChatThread();
   const threads = useMemo(() => threadsData?.threads ?? [], [threadsData?.threads]);
 
@@ -26,19 +30,29 @@ export default function ChatPage() {
     router.replace(`/chat?thread=${threads[0].id}`);
   }, [router, selectedThreadId, threads]);
 
+  const threadQuery = useChatThread(selectedThreadId);
+  const { data: threadData, isLoading: threadLoading, error: threadError } = threadQuery;
+  const sendMessage = useSendChatMessage();
+
   useEffect(() => {
-    if (selectedThreadId || threadsLoading || threads.length > 0 || autoCreatedRef.current) {
+    if (
+      selectedThreadId ||
+      threadsLoading ||
+      threadsQueryError ||
+      threads.length > 0 ||
+      autoCreatedRef.current ||
+      createThread.isError
+    ) {
       return;
     }
 
     autoCreatedRef.current = true;
     void createThread.mutateAsync().then((result) => {
       router.replace(`/chat?thread=${result.thread.id}`);
+    }).catch(() => {
+      autoCreatedRef.current = false;
     });
-  }, [createThread, router, selectedThreadId, threads, threadsLoading]);
-
-  const { data: threadData, isLoading: threadLoading } = useChatThread(selectedThreadId);
-  const sendMessage = useSendChatMessage();
+  }, [createThread, router, selectedThreadId, threads, threadsLoading, threadsQueryError]);
 
   const activeTitle = (() => {
     if (threadData?.thread.title) return threadData.thread.title;
@@ -66,6 +80,13 @@ export default function ChatPage() {
       loading={threadsLoading}
     />
   );
+
+  const pageError =
+    threadsQueryError?.message ||
+    createThread.error?.message ||
+    threadError?.message ||
+    sendMessage.error?.message ||
+    null;
 
   return (
     <div className="relative h-full overflow-hidden">
@@ -96,6 +117,11 @@ export default function ChatPage() {
                   </button>
                 </div>
               </div>
+              {pageError && (
+                <div className="mx-auto mt-3 max-w-4xl rounded-2xl border border-[var(--danger)]/20 bg-[var(--danger)]/8 px-4 py-3 text-sm text-[var(--danger)]">
+                  {pageError}
+                </div>
+              )}
             </div>
 
             {showMobileThreads && (
@@ -115,6 +141,7 @@ export default function ChatPage() {
                 <ChatMessageList messages={threadData?.messages ?? []} />
                 <ChatComposer
                   disabled={sendMessage.isPending || createThread.isPending}
+                  error={pageError}
                   onSend={async (content) => {
                     if (!selectedThreadId) {
                       const result = await createThread.mutateAsync();
