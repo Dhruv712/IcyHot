@@ -10,7 +10,12 @@ import {
   journalDrafts,
 } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { listJournalFiles, getJournalFileContent, parseJournalDate } from "./github";
+import {
+  listJournalFiles,
+  getJournalFileContent,
+  parseJournalDate,
+  journalFilename,
+} from "./github";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -77,16 +82,11 @@ export async function syncJournalEntries(userId: string): Promise<SyncResult> {
     ? JSON.parse(syncState.processedFiles)
     : [];
   const processedSet = new Set(processedFiles);
+  const lastSyncedAt = syncState?.lastSyncedAt ?? null;
 
   // 2. List files from GitHub
   const files = await listJournalFiles();
-
-  // 3. Find new files to process
-  const newFiles = files.filter((f) => !processedSet.has(f.name));
-
-  if (newFiles.length === 0) {
-    return { processed: 0, interactions: 0, insights: 0, openLoops: 0, newPeople: 0 };
-  }
+  const filesByName = new Map(files.map((file) => [file.name, file]));
 
   // 4. Fetch contacts for matching
   const allContacts = await db
@@ -98,11 +98,54 @@ export async function syncJournalEntries(userId: string): Promise<SyncResult> {
     .select({
       entryDate: journalDrafts.entryDate,
       content: journalDrafts.content,
+      updatedAt: journalDrafts.updatedAt,
+      committedToGithubAt: journalDrafts.committedToGithubAt,
     })
     .from(journalDrafts)
     .where(eq(journalDrafts.userId, userId));
 
   const draftsByDate = new Map(draftRows.map((draft) => [draft.entryDate, draft.content]));
+  const candidates = new Map<
+    string,
+    {
+      name: string;
+      path: string | null;
+      entryDate: string;
+    }
+  >();
+
+  for (const file of files) {
+    if (!processedSet.has(file.name)) {
+      const entryDate = parseJournalDate(file.name);
+      if (!entryDate) continue;
+      candidates.set(file.name, {
+        name: file.name,
+        path: file.path,
+        entryDate,
+      });
+    }
+  }
+
+  for (const draft of draftRows) {
+    const shouldResync =
+      !lastSyncedAt ||
+      draft.updatedAt > lastSyncedAt ||
+      (draft.committedToGithubAt !== null && draft.committedToGithubAt > lastSyncedAt);
+
+    if (!shouldResync) continue;
+
+    const filename = journalFilename(new Date(`${draft.entryDate}T12:00:00`));
+    const gitFile = filesByName.get(filename);
+    candidates.set(filename, {
+      name: filename,
+      path: gitFile?.path ?? null,
+      entryDate: draft.entryDate,
+    });
+  }
+
+  if (candidates.size === 0) {
+    return { processed: 0, interactions: 0, insights: 0, openLoops: 0, newPeople: 0 };
+  }
 
   const result: SyncResult = {
     processed: 0,
@@ -112,31 +155,28 @@ export async function syncJournalEntries(userId: string): Promise<SyncResult> {
     newPeople: 0,
   };
 
-  // 5. Process each new file
-  for (const file of newFiles) {
-    const entryDate = parseJournalDate(file.name);
-    if (!entryDate) {
-      console.log(`[journal-sync] Skipping ${file.name}: could not parse date`);
-      continue;
-    }
-
-    const content = draftsByDate.get(entryDate) ?? (await getJournalFileContent(file.path));
+  // 5. Process each new or updated entry
+  for (const candidate of candidates.values()) {
+    const { entryDate } = candidate;
+    const content =
+      draftsByDate.get(entryDate) ??
+      (candidate.path ? await getJournalFileContent(candidate.path) : "");
     if (!content.trim()) {
-      console.log(`[journal-sync] Skipping ${file.name}: empty content`);
+      console.log(`[journal-sync] Skipping ${candidate.name}: empty content`);
       continue;
     }
 
-    console.log(`[journal-sync] Processing ${file.name} (${content.length} chars, ${allContacts.length} contacts)`);
+    console.log(`[journal-sync] Processing ${candidate.name} (${content.length} chars, ${allContacts.length} contacts)`);
 
     const extraction = await extractInsights(content, entryDate, allContacts);
     if (!extraction) {
       // Still mark as processed so we don't retry on error
-      console.log(`[journal-sync] ${file.name}: extraction returned null`);
-      processedSet.add(file.name);
+      console.log(`[journal-sync] ${candidate.name}: extraction returned null`);
+      processedSet.add(candidate.name);
       continue;
     }
 
-    console.log(`[journal-sync] ${file.name}: extracted ${extraction.interactions.length} interactions, ${extraction.openLoops.length} open loops, ${extraction.newPeople.length} new people`);
+    console.log(`[journal-sync] ${candidate.name}: extracted ${extraction.interactions.length} interactions, ${extraction.openLoops.length} open loops, ${extraction.newPeople.length} new people`);
     for (const ix of extraction.interactions) {
       console.log(`[journal-sync]   interaction: "${ix.contactName}" (id: ${ix.contactId}) - ${ix.sentiment}`);
     }
@@ -149,7 +189,7 @@ export async function syncJournalEntries(userId: string): Promise<SyncResult> {
     result.newPeople += counts.newPeople;
     result.processed++;
 
-    processedSet.add(file.name);
+    processedSet.add(candidate.name);
   }
 
   // 7. Update sync state

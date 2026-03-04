@@ -19,6 +19,7 @@ export interface MarginAnnotation {
   type: "ghost_question" | "tension";
   text: string;
   paragraphIndex: number;
+  anchorText?: string;
   memoryDate?: string;
   memorySnippet?: string;
 }
@@ -26,6 +27,7 @@ export interface MarginAnnotation {
 export interface SparkNudgeCard extends SparkNudge {
   createdAtMs: number;
   collapsed: boolean;
+  anchorText?: string;
   feedback?: {
     value: "up" | "down";
     reason?: MarginDownReason;
@@ -423,6 +425,7 @@ export function useMarginIntelligence({
             ...nudge,
             createdAtMs: Date.now(),
             collapsed: true,
+            anchorText: paragraphText,
           }));
 
           for (const nudge of incomingNudges) {
@@ -448,7 +451,10 @@ export function useMarginIntelligence({
             if (dismissedAnnotationsRef.current.has(sig)) return false;
             if (shownAnnotationsRef.current.has(sig)) return false;
             return true;
-          });
+          }).map((annotation) => ({
+            ...annotation,
+            anchorText: paragraphText,
+          }));
 
           if (newOnes.length > 0) {
             for (const annotation of newOnes) {

@@ -11,6 +11,7 @@ import {
   listJournalFiles,
   getJournalFileContent,
   parseJournalDate,
+  journalFilename,
 } from "@/lib/github";
 import { extractMemories } from "./extract";
 import { storeMemories } from "./store";
@@ -47,19 +48,11 @@ export async function processMemories(
   const processedSet = new Set<string>(
     syncState?.processedFiles ? JSON.parse(syncState.processedFiles) : []
   );
+  const lastProcessedAt = syncState?.lastProcessedAt ?? null;
 
   // 2. List all journal files from GitHub
   const allFiles = await listJournalFiles();
-  const newFiles = allFiles.filter((f) => !processedSet.has(f.name));
-
-  if (newFiles.length === 0) {
-    console.log("[memory-pipeline] No new files to process");
-    return result;
-  }
-
-  console.log(
-    `[memory-pipeline] ${newFiles.length} new file(s) to process`
-  );
+  const filesByName = new Map(allFiles.map((file) => [file.name, file]));
 
   // 3. Get all contacts for name resolution
   const allContacts = await db
@@ -72,6 +65,8 @@ export async function processMemories(
       entryDate: journalDrafts.entryDate,
       content: journalDrafts.content,
       contentJson: journalDrafts.contentJson,
+      updatedAt: journalDrafts.updatedAt,
+      committedToGithubAt: journalDrafts.committedToGithubAt,
     })
     .from(journalDrafts)
     .where(eq(journalDrafts.userId, userId));
@@ -79,9 +74,57 @@ export async function processMemories(
   const draftsByDate = new Map(
     draftRows.map((draft) => [draft.entryDate, draft]),
   );
+  const candidates = new Map<
+    string,
+    {
+      name: string;
+      path: string | null;
+      entryDate: string;
+    }
+  >();
+
+  for (const file of allFiles) {
+    if (!processedSet.has(file.name)) {
+      const entryDate = parseJournalDate(file.name);
+      if (!entryDate) continue;
+      candidates.set(file.name, {
+        name: file.name,
+        path: file.path,
+        entryDate,
+      });
+    }
+  }
+
+  for (const draft of draftRows) {
+    const shouldReprocess =
+      !lastProcessedAt ||
+      draft.updatedAt > lastProcessedAt ||
+      (draft.committedToGithubAt !== null && draft.committedToGithubAt > lastProcessedAt);
+
+    if (!shouldReprocess) continue;
+
+    const filename = journalFilename(new Date(`${draft.entryDate}T12:00:00`));
+    const gitFile = filesByName.get(filename);
+    candidates.set(filename, {
+      name: filename,
+      path: gitFile?.path ?? null,
+      entryDate: draft.entryDate,
+    });
+  }
+
+  const candidateList = Array.from(candidates.values());
+  if (candidateList.length === 0) {
+    console.log("[memory-pipeline] No new or updated entries to process");
+    return result;
+  }
+
+  console.log(
+    `[memory-pipeline] ${candidateList.length} new/updated entr${candidateList.length === 1 ? "y" : "ies"} to process`
+  );
+  const completedCandidates = new Set<string>();
 
   // 4. Process each new file (up to limit)
-  for (const file of newFiles) {
+  for (const file of candidateList) {
     if (result.filesProcessed >= maxFiles) break;
 
     // Check if we have enough time left (need at least 15s for a full cycle)
@@ -93,10 +136,11 @@ export async function processMemories(
       break;
     }
 
-    const entryDate = parseJournalDate(file.name);
+    const entryDate = file.entryDate;
     if (!entryDate) {
       console.warn(`[memory-pipeline] Skipping "${file.name}" — can't parse date`);
       processedSet.add(file.name);
+      completedCandidates.add(file.name);
       continue;
     }
 
@@ -104,10 +148,11 @@ export async function processMemories(
       console.log(`[memory-pipeline] Processing "${file.name}" (${entryDate})`);
 
       const draft = draftsByDate.get(entryDate);
-      const content = draft?.content ?? (await getJournalFileContent(file.path));
+      const content = draft?.content ?? (file.path ? await getJournalFileContent(file.path) : "");
       if (!content || content.trim().length < 50) {
         console.log(`[memory-pipeline] Skipping "${file.name}" — too short`);
         processedSet.add(file.name);
+        completedCandidates.add(file.name);
         continue;
       }
 
@@ -128,6 +173,7 @@ export async function processMemories(
       if (extracted.length === 0) {
         console.log(`[memory-pipeline] No memories extracted from "${file.name}"`);
         processedSet.add(file.name);
+        completedCandidates.add(file.name);
         continue;
       }
 
@@ -153,6 +199,7 @@ export async function processMemories(
       result.memoriesReinforced += counts.reinforced;
       result.filesProcessed++;
       processedSet.add(file.name);
+      completedCandidates.add(file.name);
 
       console.log(
         `[memory-pipeline] "${file.name}": ${extracted.length} extracted, ${counts.created} created, ${counts.reinforced} reinforced`
@@ -167,7 +214,7 @@ export async function processMemories(
   }
 
   // 5. Count remaining unprocessed files
-  result.remaining = newFiles.filter((f) => !processedSet.has(f.name)).length;
+  result.remaining = candidateList.filter((candidate) => !completedCandidates.has(candidate.name)).length;
 
   // 6. Update sync state
   const newProcessedFiles = JSON.stringify([...processedSet]);
