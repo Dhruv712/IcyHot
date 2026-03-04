@@ -50,6 +50,13 @@
       "when": 1772409073874,
       "tag": "0006_journal_mentions_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1772586960000,
+      "tag": "0007_chat_threads",
+      "breakpoints": true
     }
   ]
 }
