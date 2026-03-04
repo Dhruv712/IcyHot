@@ -16,6 +16,7 @@ export default function ChatPage() {
   const selectedThreadId = searchParams.get("thread") ?? undefined;
   const [showMobileThreads, setShowMobileThreads] = useState(false);
   const autoCreatedRef = useRef(false);
+  const pendingFirstMessageRef = useRef<string | null>(null);
 
   const { data: threadsData, isLoading: threadsLoading } = useChatThreads();
   const createThread = useCreateChatThread();
@@ -39,13 +40,22 @@ export default function ChatPage() {
 
   const { data: threadData, isLoading: threadLoading } = useChatThread(selectedThreadId);
   const sendMessage = useSendChatMessage(selectedThreadId);
-  const readyForChat = Boolean(selectedThreadId) && !createThread.isPending;
 
-  const activeTitle = useMemo(() => {
+  const activeTitle = (() => {
     if (threadData?.thread.title) return threadData.thread.title;
     if (selectedThreadId) return "Chat";
     return "Memory chat";
-  }, [selectedThreadId, threadData?.thread.title]);
+  })();
+
+  useEffect(() => {
+    if (!selectedThreadId || !pendingFirstMessageRef.current || sendMessage.isPending) {
+      return;
+    }
+
+    const content = pendingFirstMessageRef.current;
+    pendingFirstMessageRef.current = null;
+    void sendMessage.mutateAsync({ content });
+  }, [selectedThreadId, sendMessage]);
 
   const handleCreateThread = async () => {
     const result = await createThread.mutateAsync();
@@ -115,9 +125,12 @@ export default function ChatPage() {
               <>
                 <ChatMessageList messages={threadData?.messages ?? []} />
                 <ChatComposer
-                  disabled={!readyForChat || sendMessage.isPending}
+                  disabled={sendMessage.isPending || createThread.isPending}
                   onSend={async (content) => {
                     if (!selectedThreadId) {
+                      pendingFirstMessageRef.current = content;
+                      const result = await createThread.mutateAsync();
+                      router.push(`/chat?thread=${result.thread.id}`);
                       return;
                     }
                     await sendMessage.mutateAsync({ content });
