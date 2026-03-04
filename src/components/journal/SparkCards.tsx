@@ -114,9 +114,20 @@ export default function SparkCards({
     });
     observer.observe(proseMirror);
 
+    const mutationObserver = new MutationObserver(() => {
+      if (recalcRef.current) clearTimeout(recalcRef.current);
+      recalcRef.current = setTimeout(recalcPositions, 16);
+    });
+    mutationObserver.observe(proseMirror, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+
     return () => {
       cancelAnimationFrame(raf);
       observer.disconnect();
+      mutationObserver.disconnect();
       if (recalcRef.current) clearTimeout(recalcRef.current);
     };
   }, [editorElement, recalcPositions]);
