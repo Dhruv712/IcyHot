@@ -129,6 +129,17 @@ export const journalReminderRepeatRuleEnum = pgEnum("journal_reminder_repeat_rul
   "monthly",
 ]);
 
+export const chatMessageRoleEnum = pgEnum("chat_message_role", [
+  "user",
+  "assistant",
+]);
+
+export const chatMessageStatusEnum = pgEnum("chat_message_status", [
+  "streaming",
+  "complete",
+  "error",
+]);
+
 export const interactions = pgTable("interactions", {
   id: uuid("id").defaultRandom().primaryKey(),
   contactId: uuid("contact_id")
@@ -291,6 +302,52 @@ export const journalReminders = pgTable(
       table.status,
       table.dueAt
     ),
+  ]
+);
+
+export const chatThreads = pgTable(
+  "chat_threads",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    title: text("title").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    lastMessageAt: timestamp("last_message_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("chat_threads_user_last_message_idx").on(
+      table.userId,
+      table.lastMessageAt
+    ),
+  ]
+);
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    threadId: uuid("thread_id")
+      .references(() => chatThreads.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    role: chatMessageRoleEnum("role").notNull(),
+    content: text("content").notNull(),
+    status: chatMessageStatusEnum("status").default("complete").notNull(),
+    model: text("model"),
+    retrievalStats: jsonb("retrieval_stats"),
+    sources: jsonb("sources"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("chat_messages_thread_created_idx").on(table.threadId, table.createdAt),
+    index("chat_messages_user_created_idx").on(table.userId, table.createdAt),
   ]
 );
 

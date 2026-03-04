@@ -47,6 +47,15 @@ const NAV_ITEMS = [
     ),
   },
   {
+    href: "/chat",
+    label: "Chat",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75h6.75M8.625 13.5h4.5M6.75 19.5l-2.074.692A.75.75 0 014.5 19.48V6.75A2.25 2.25 0 016.75 4.5h10.5a2.25 2.25 0 012.25 2.25v8.25a2.25 2.25 0 01-2.25 2.25h-7.19a2.25 2.25 0 00-1.143.312L6.75 19.5z" />
+      </svg>
+    ),
+  },
+  {
     href: "/contacts",
     label: "People",
     icon: (
