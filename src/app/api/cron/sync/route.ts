@@ -10,6 +10,7 @@ import { processMemories } from "@/lib/memory/pipeline";
 import { consolidateMemories } from "@/lib/memory/consolidate";
 import { generateProvocationsForUser } from "@/lib/memory/provoke";
 import { createConsolidationDigest } from "@/lib/memory/consolidationDigest";
+import { refreshPredictiveModelForUser } from "@/lib/predictive/pipeline";
 import {
   getDateStringInTimeZone,
 } from "@/lib/timezone";
@@ -48,6 +49,16 @@ export async function GET(request: NextRequest) {
     };
     provocations: { success: boolean; generated?: number; error?: string };
     healthSnapshot: { success: boolean; error?: string };
+    predictive: {
+      success: boolean;
+      syncedFrames?: number;
+      trained?: boolean;
+      scored?: number;
+      modelKey?: string;
+      modelVersion?: string;
+      skipped?: string;
+      error?: string;
+    };
   }> = [];
 
   for (const user of allUsers) {
@@ -66,6 +77,7 @@ export async function GET(request: NextRequest) {
       overnightPush: { success: false },
       provocations: { success: false },
       healthSnapshot: { success: false },
+      predictive: { success: false },
     };
 
     let hasNewContent = false;
@@ -100,6 +112,25 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error(`[cron] Calendar sync failed for ${user.id}:`, error);
       result.calendar = {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+
+    try {
+      const predictiveResult = await refreshPredictiveModelForUser(user.id);
+      result.predictive = {
+        success: true,
+        syncedFrames: predictiveResult.syncedFrames,
+        trained: predictiveResult.trained,
+        scored: predictiveResult.scored,
+        modelKey: predictiveResult.modelKey,
+        modelVersion: predictiveResult.modelVersion,
+        skipped: predictiveResult.skipped,
+      };
+    } catch (error) {
+      console.error(`[cron] Predictive model refresh failed for ${user.id}:`, error);
+      result.predictive = {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };

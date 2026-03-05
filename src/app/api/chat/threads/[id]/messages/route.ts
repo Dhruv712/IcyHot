@@ -7,6 +7,7 @@ import { streamChatAnswer, buildThreadTitle, getChatModel } from "@/lib/chat/ans
 import { buildChatRetrievalStats, buildChatSources } from "@/lib/chat/retrieval";
 import { getThreadForUser, listMessagesForThread } from "@/lib/chat/store";
 import { retrieveMemories } from "@/lib/memory/retrieve";
+import { rerankRetrievalForChat } from "@/lib/predictive/rerank";
 import type { ChatMessage, ChatRetrievalStats, ChatSourcesPayload, ChatStreamEvent } from "@/lib/chat/types";
 
 export const maxDuration = 60;
@@ -138,8 +139,17 @@ export async function POST(
           skipHebbian: true,
         });
 
-        stats = buildChatRetrievalStats(retrieval);
-        sources = buildChatSources(retrieval);
+        const reranked = await rerankRetrievalForChat({
+          userId: session.user.id,
+          question: content,
+          retrieval,
+        });
+
+        stats = buildChatRetrievalStats(reranked.retrieval);
+        sources = buildChatSources(
+          reranked.retrieval,
+          reranked.applied ? reranked.metadataByMemoryId : undefined,
+        );
 
         emit(controller, encoder, {
           type: "retrieval_complete",
@@ -155,7 +165,7 @@ export async function POST(
         const answerStream = streamChatAnswer({
           question: content,
           history: history.map((message) => ({ role: message.role, content: message.content })),
-          retrieval,
+          retrieval: reranked.retrieval,
         });
 
         answerStream.on("text", (delta) => {

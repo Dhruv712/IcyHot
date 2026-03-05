@@ -1,5 +1,6 @@
 import type { RetrievalResult } from "@/lib/memory/retrieve";
 import type { ChatRetrievalStats, ChatSourcesPayload } from "./types";
+import type { PredictiveMemoryMetadata } from "@/lib/predictive/rerank";
 
 const MAX_PROMPT_MEMORIES = 10;
 const MAX_PROMPT_IMPLICATIONS = 6;
@@ -19,7 +20,10 @@ export function buildChatRetrievalStats(result: RetrievalResult): ChatRetrievalS
   };
 }
 
-export function buildChatSources(result: RetrievalResult): ChatSourcesPayload {
+export function buildChatSources(
+  result: RetrievalResult,
+  predictiveByMemoryId?: Record<string, PredictiveMemoryMetadata>
+): ChatSourcesPayload {
   return {
     memories: result.memories.map((memory) => ({
       id: memory.id,
@@ -27,6 +31,15 @@ export function buildChatSources(result: RetrievalResult): ChatSourcesPayload {
       snippet: truncate(memory.content, 220),
       activationScore: Number(memory.activationScore.toFixed(3)),
       hop: memory.hop,
+      predictive: predictiveByMemoryId?.[memory.id]
+        ? {
+            score: Number(predictiveByMemoryId[memory.id].score.toFixed(3)),
+            rankDelta: predictiveByMemoryId[memory.id].rankDelta,
+            modelKey: predictiveByMemoryId[memory.id].modelKey,
+            modelVersion: predictiveByMemoryId[memory.id].modelVersion,
+            why: predictiveByMemoryId[memory.id].why,
+          }
+        : undefined,
     })),
     implications: result.implications.map((implication) => ({
       id: implication.id,

@@ -351,6 +351,83 @@ export const chatMessages = pgTable(
   ]
 );
 
+export const journalStateFrames = pgTable(
+  "journal_state_frames",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    entryDate: date("entry_date").notNull(),
+    entryId: uuid("entry_id").references(() => journalDrafts.id, {
+      onDelete: "set null",
+    }),
+    stateVector: jsonb("state_vector").$type<number[]>().notNull(),
+    taxonomyVersion: text("taxonomy_version").default("core10_v1").notNull(),
+    contentHash: text("content_hash").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("journal_state_frames_user_date_idx").on(table.userId, table.entryDate),
+    uniqueIndex("journal_state_frames_user_entry_idx").on(table.userId, table.entryId),
+    index("journal_state_frames_user_date_sort_idx").on(table.userId, table.entryDate),
+  ]
+);
+
+export const stateTransitionModels = pgTable(
+  "state_transition_models",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    modelKey: text("model_key").notNull(),
+    modelVersion: text("model_version").notNull(),
+    artifactSchemaVersion: integer("artifact_schema_version").default(1).notNull(),
+    trainedThroughEntryDate: date("trained_through_entry_date").notNull(),
+    configJson: jsonb("config_json").$type<Record<string, unknown>>().default({}).notNull(),
+    metricsJson: jsonb("metrics_json").$type<Record<string, number>>().default({}).notNull(),
+    artifactJson: jsonb("artifact_json").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("state_transition_models_user_created_idx").on(table.userId, table.createdAt),
+    index("state_transition_models_user_model_idx").on(table.userId, table.modelKey, table.createdAt),
+  ]
+);
+
+export const predictiveModelOverrides = pgTable("predictive_model_overrides", {
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull()
+    .primaryKey(),
+  modelKey: text("model_key").notNull(),
+  configJson: jsonb("config_json").$type<Record<string, unknown>>().default({}).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const predictiveGlobalConfig = pgTable("predictive_global_config", {
+  id: integer("id").primaryKey().default(1),
+  modelKey: text("model_key").notNull(),
+  configJson: jsonb("config_json").$type<Record<string, unknown>>().default({}).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const userPredictiveStatus = pgTable("user_predictive_status", {
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull()
+    .primaryKey(),
+  backfillCompleteAt: timestamp("backfill_complete_at"),
+  lastEntryProcessedAt: timestamp("last_entry_processed_at"),
+  lastTrainedAt: timestamp("last_trained_at"),
+  activeModelKey: text("active_model_key"),
+  activeModelVersion: text("active_model_version"),
+  framesCount: integer("frames_count").default(0).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ── Daily Suggestions ──────────────────────────────────────────────────
 
 export const dailySuggestions = pgTable(
@@ -513,6 +590,37 @@ export const memories = pgTable(
     lastActivatedAt: timestamp("last_activated_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
+);
+
+export const memoryPredictiveScores = pgTable(
+  "memory_predictive_scores",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    memoryId: uuid("memory_id")
+      .references(() => memories.id, { onDelete: "cascade" })
+      .notNull(),
+    modelKey: text("model_key").notNull(),
+    modelVersion: text("model_version").notNull(),
+    predictiveScore: real("predictive_score").notNull(),
+    whyJson: jsonb("why_json").$type<string[]>().default([]),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("memory_predictive_scores_user_memory_model_idx").on(
+      table.userId,
+      table.memoryId,
+      table.modelKey,
+      table.modelVersion
+    ),
+    index("memory_predictive_scores_user_model_idx").on(
+      table.userId,
+      table.modelKey,
+      table.updatedAt
+    ),
+  ]
 );
 
 export const journalNudges = pgTable(

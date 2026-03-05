@@ -23,7 +23,20 @@ export default function ChatSources({ sources }: { sources: ChatSourcesPayload |
                   <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
                     {memory.date} · score {memory.activationScore.toFixed(3)}
                   </p>
+                  {memory.predictive && (
+                    <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                      predictive {memory.predictive.score.toFixed(3)} · {memory.predictive.modelKey} · Δ rank{" "}
+                      {memory.predictive.rankDelta > 0 ? `+${memory.predictive.rankDelta}` : memory.predictive.rankDelta}
+                    </p>
+                  )}
                   <p className="mt-1 text-sm leading-relaxed text-[var(--text-primary)]">{memory.snippet}</p>
+                  {memory.predictive?.why.length ? (
+                    <ul className="mt-2 space-y-1 text-xs text-[var(--text-muted)]">
+                      {memory.predictive.why.slice(0, 2).map((reason, index) => (
+                        <li key={`${memory.id}-why-${index}`}>- {reason}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ))}
             </div>

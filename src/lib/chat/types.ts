@@ -19,6 +19,13 @@ export type ChatSourcesPayload = {
     snippet: string;
     activationScore: number;
     hop: number;
+    predictive?: {
+      score: number;
+      rankDelta: number;
+      modelKey: string;
+      modelVersion: string;
+      why: string[];
+    };
   }>;
   implications: Array<{
     id: string;
