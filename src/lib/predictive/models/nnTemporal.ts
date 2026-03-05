@@ -1,6 +1,7 @@
 import type {
   LoadedModelHandle,
   ModelArtifactEnvelope,
+  PredictiveLearningSummary,
   PredictiveContext,
   PredictiveMemoryCandidate,
   PredictiveModelAdapter,
@@ -90,5 +91,27 @@ export const nnTemporalPlaceholderModel: PredictiveModelAdapter = {
       "Neural temporal model is running in placeholder shadow mode.",
       "Ranking currently falls back to semantic activation behavior.",
     ];
+  },
+  predictNextState(
+    history: PredictiveStateFrame[],
+    config: Record<string, unknown>,
+    handle: LoadedModelHandle
+  ): number[] {
+    void config;
+    void handle;
+    return [...(history.at(-1)?.vector ?? [])];
+  },
+  summarizeLearning(handle: LoadedModelHandle): PredictiveLearningSummary {
+    const payload =
+      handle.payload && typeof handle.payload === "object" ? (handle.payload as Record<string, unknown>) : {};
+
+    return {
+      summaryText: "Neural temporal adapter is enabled in shadow placeholder mode.",
+      keySignals: [
+        "No neural weights are trained in this placeholder implementation.",
+        "Next-state predictions currently mirror persistence baseline behavior.",
+      ],
+      modelSpecific: payload,
+    };
   },
 };

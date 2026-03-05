@@ -140,6 +140,22 @@ export const chatMessageStatusEnum = pgEnum("chat_message_status", [
   "error",
 ]);
 
+export const predictiveBenchmarkTriggerEnum = pgEnum("predictive_benchmark_trigger", [
+  "nightly",
+  "manual",
+]);
+
+export const predictiveBenchmarkModeEnum = pgEnum("predictive_benchmark_mode", [
+  "quick",
+  "full",
+]);
+
+export const predictiveBenchmarkStatusEnum = pgEnum("predictive_benchmark_status", [
+  "running",
+  "complete",
+  "error",
+]);
+
 export const interactions = pgTable("interactions", {
   id: uuid("id").defaultRandom().primaryKey(),
   contactId: uuid("contact_id")
@@ -422,11 +438,74 @@ export const userPredictiveStatus = pgTable("user_predictive_status", {
   backfillCompleteAt: timestamp("backfill_complete_at"),
   lastEntryProcessedAt: timestamp("last_entry_processed_at"),
   lastTrainedAt: timestamp("last_trained_at"),
+  lastScoredAt: timestamp("last_scored_at"),
   activeModelKey: text("active_model_key"),
   activeModelVersion: text("active_model_version"),
   framesCount: integer("frames_count").default(0).notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+export const predictiveBenchmarkRuns = pgTable(
+  "predictive_benchmark_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    trigger: predictiveBenchmarkTriggerEnum("trigger").notNull(),
+    mode: predictiveBenchmarkModeEnum("mode").notNull(),
+    status: predictiveBenchmarkStatusEnum("status").default("running").notNull(),
+    modelKey: text("model_key"),
+    modelVersion: text("model_version"),
+    baselineKey: text("baseline_key").default("persistence_v1").notNull(),
+    frameCount: integer("frame_count").notNull(),
+    checkpointSchedule: jsonb("checkpoint_schedule").$type<number[]>().default([]).notNull(),
+    sampleLimit: integer("sample_limit").notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    completedAt: timestamp("completed_at"),
+    durationMs: integer("duration_ms"),
+    summaryJson: jsonb("summary_json").$type<Record<string, unknown>>(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("predictive_benchmark_runs_user_created_idx").on(table.userId, table.createdAt),
+    index("predictive_benchmark_runs_user_status_idx").on(table.userId, table.status),
+  ]
+);
+
+export const predictiveBenchmarkPoints = pgTable(
+  "predictive_benchmark_points",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    runId: uuid("run_id")
+      .references(() => predictiveBenchmarkRuns.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    checkpointSize: integer("checkpoint_size").notNull(),
+    sampleCount: integer("sample_count").notNull(),
+    mae: real("mae").notNull(),
+    mse: real("mse").notNull(),
+    directionalHitRate: real("directional_hit_rate").notNull(),
+    baselineMae: real("baseline_mae").notNull(),
+    baselineMse: real("baseline_mse").notNull(),
+    baselineDirectionalHitRate: real("baseline_directional_hit_rate").notNull(),
+    maeGainPct: real("mae_gain_pct").notNull(),
+    directionalGainPct: real("directional_gain_pct").notNull(),
+    perDimensionJson: jsonb("per_dimension_json").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("predictive_benchmark_points_run_checkpoint_idx").on(
+      table.runId,
+      table.checkpointSize,
+    ),
+    index("predictive_benchmark_points_user_created_idx").on(table.userId, table.createdAt),
+    index("predictive_benchmark_points_run_idx").on(table.runId),
+  ]
+);
 
 // ── Daily Suggestions ──────────────────────────────────────────────────
 

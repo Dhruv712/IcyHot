@@ -1,6 +1,7 @@
 import type {
   LoadedModelHandle,
   ModelArtifactEnvelope,
+  PredictiveLearningSummary,
   PredictiveContext,
   PredictiveMemoryCandidate,
   PredictiveModelAdapter,
@@ -30,6 +31,19 @@ const DEFAULT_CONFIG: SeqLinearConfig = {
   recencyWeight: 0.24,
   hopPenalty: 0.17,
 };
+
+const CORE10_DIMENSIONS = [
+  "emotionalIntensity",
+  "valence",
+  "decision",
+  "relationship",
+  "uncertainty",
+  "belief",
+  "action",
+  "calm",
+  "stress",
+  "novelty",
+] as const;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -100,6 +114,11 @@ function averageTrend(vectors: number[][]): number[] {
 
 function vectorNorm(vector: number[]): number {
   return Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+}
+
+function formatSigned(value: number): string {
+  const rounded = Number(value.toFixed(4));
+  return rounded > 0 ? `+${rounded}` : `${rounded}`;
 }
 
 export const seqLinearModel: PredictiveModelAdapter = {
@@ -216,5 +235,70 @@ export const seqLinearModel: PredictiveModelAdapter = {
     void handle;
 
     return reasons;
+  },
+  predictNextState(
+    history: PredictiveStateFrame[],
+    config: Record<string, unknown>,
+    handle: LoadedModelHandle
+  ): number[] {
+    void config;
+
+    const payload = (handle.payload ?? {}) as Partial<SeqLinearPayload>;
+    const centroid = Array.isArray(payload.centroid)
+      ? payload.centroid.map((value) => (typeof value === "number" ? value : Number(value)))
+      : [];
+    const trend = Array.isArray(payload.trend)
+      ? payload.trend.map((value) => (typeof value === "number" ? value : Number(value)))
+      : [];
+    const lastVector = history.at(-1)?.vector ?? centroid;
+    const dimension = Math.max(lastVector.length, centroid.length, trend.length);
+    if (dimension === 0) return [];
+
+    const projected = Array.from({ length: dimension }, (_, index) => {
+      const base = lastVector[index] ?? centroid[index] ?? 0;
+      const drift = trend[index] ?? 0;
+      const centroidAnchor = centroid[index] ?? base;
+      const combined = base + drift * 0.65 + (centroidAnchor - base) * 0.18;
+      return Number(clamp(combined, 0, 1).toFixed(6));
+    });
+
+    return projected;
+  },
+  summarizeLearning(handle: LoadedModelHandle): PredictiveLearningSummary {
+    const payload = (handle.payload ?? {}) as Partial<SeqLinearPayload>;
+    const centroid = Array.isArray(payload.centroid)
+      ? payload.centroid.map((value) => (typeof value === "number" ? value : Number(value)))
+      : [];
+    const trend = Array.isArray(payload.trend)
+      ? payload.trend.map((value) => (typeof value === "number" ? value : Number(value)))
+      : [];
+
+    const rankedTrendSignals = trend
+      .map((value, index) => ({ index, magnitude: Math.abs(value), value }))
+      .sort((a, b) => b.magnitude - a.magnitude)
+      .slice(0, 3);
+
+    const keySignals = rankedTrendSignals.map((signal) => {
+      const label = CORE10_DIMENSIONS[signal.index] ?? `dim_${signal.index + 1}`;
+      return `${label}: ${formatSigned(signal.value)} trend`;
+    });
+
+    const summaryText =
+      keySignals.length > 0
+        ? `Linear sequence model learned a stable centroid with strongest movement in ${keySignals
+            .map((item) => item.split(":")[0])
+            .join(", ")}.`
+        : "Linear sequence model has sparse training data and no clear directional signals yet.";
+
+    return {
+      summaryText,
+      keySignals,
+      modelSpecific: {
+        centroid,
+        trend,
+        centroidNorm: Number(vectorNorm(centroid).toFixed(6)),
+        trendNorm: Number(vectorNorm(trend).toFixed(6)),
+      },
+    };
   },
 };

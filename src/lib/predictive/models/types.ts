@@ -43,6 +43,12 @@ export type LoadedModelHandle = {
   payload: unknown;
 };
 
+export type PredictiveLearningSummary = {
+  summaryText: string;
+  keySignals: string[];
+  modelSpecific: Record<string, unknown>;
+};
+
 export interface PredictiveModelAdapter {
   modelKey(): string;
   modelVersion(): string;
@@ -63,5 +69,11 @@ export interface PredictiveModelAdapter {
     handle: LoadedModelHandle,
     score: PredictiveScore
   ): string[];
+  predictNextState(
+    history: PredictiveStateFrame[],
+    config: Record<string, unknown>,
+    handle: LoadedModelHandle
+  ): number[];
+  summarizeLearning(handle: LoadedModelHandle): PredictiveLearningSummary;
   validateConfig(config: unknown): ValidationResult;
 }

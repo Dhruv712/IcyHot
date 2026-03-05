@@ -1,6 +1,7 @@
 import type {
   LoadedModelHandle,
   ModelArtifactEnvelope,
+  PredictiveLearningSummary,
   PredictiveContext,
   PredictiveMemoryCandidate,
   PredictiveModelAdapter,
@@ -101,6 +102,20 @@ function expectedNextEnergy(transition: number[][]): number {
   const neutral = transition[1] ?? [1 / 3, 1 / 3, 1 / 3];
   // Low, medium, high mapped to 0.2 / 0.5 / 0.85
   return neutral[0] * 0.2 + neutral[1] * 0.5 + neutral[2] * 0.85;
+}
+
+function energyFromTransitionRow(row: number[]): number {
+  const low = row[0] ?? 1 / 3;
+  const mid = row[1] ?? 1 / 3;
+  const high = row[2] ?? 1 / 3;
+  return clamp(low * 0.2 + mid * 0.5 + high * 0.85, 0, 1);
+}
+
+function dominantTransitionLabel(row: number[]): string {
+  const index = row.indexOf(Math.max(...row));
+  if (index === 0) return "low-intensity";
+  if (index === 1) return "moderate-intensity";
+  return "high-intensity";
 }
 
 export const seqMarkovModel: PredictiveModelAdapter = {
@@ -213,5 +228,65 @@ export const seqMarkovModel: PredictiveModelAdapter = {
     void handle;
 
     return reasons;
+  },
+  predictNextState(
+    history: PredictiveStateFrame[],
+    config: Record<string, unknown>,
+    handle: LoadedModelHandle
+  ): number[] {
+    void config;
+
+    const payload = (handle.payload ?? {}) as Partial<SeqMarkovPayload>;
+    const transition = Array.isArray(payload.transition)
+      ? payload.transition.map((row) =>
+          Array.isArray(row)
+            ? row.map((value) => (typeof value === "number" ? value : Number(value)))
+            : []
+        )
+      : [];
+
+    const fallback = history.at(-1)?.vector ?? [];
+    if (fallback.length === 0) return [];
+
+    const currentBucket = stateBucket(fallback);
+    const row = transition[currentBucket] ?? transition[1] ?? [1 / 3, 1 / 3, 1 / 3];
+    const projectedEnergy = energyFromTransitionRow(row);
+    const next = [...fallback];
+
+    next[0] = Number(projectedEnergy.toFixed(6));
+    next[8] = Number(clamp(projectedEnergy * 0.82, 0, 1).toFixed(6));
+    next[7] = Number(clamp(1 - projectedEnergy * 0.75, 0, 1).toFixed(6));
+
+    return next.map((value) => Number(clamp(value ?? 0, 0, 1).toFixed(6)));
+  },
+  summarizeLearning(handle: LoadedModelHandle): PredictiveLearningSummary {
+    const payload = (handle.payload ?? {}) as Partial<SeqMarkovPayload>;
+    const transition = Array.isArray(payload.transition)
+      ? payload.transition.map((row) =>
+          Array.isArray(row)
+            ? row.map((value) => (typeof value === "number" ? value : Number(value)))
+            : []
+        )
+      : [];
+
+    const lowRow = transition[0] ?? [1 / 3, 1 / 3, 1 / 3];
+    const neutralRow = transition[1] ?? [1 / 3, 1 / 3, 1 / 3];
+    const highRow = transition[2] ?? [1 / 3, 1 / 3, 1 / 3];
+
+    const keySignals = [
+      `Low-energy state tends toward ${dominantTransitionLabel(lowRow)}.`,
+      `Neutral state tends toward ${dominantTransitionLabel(neutralRow)}.`,
+      `High-energy state tends toward ${dominantTransitionLabel(highRow)}.`,
+    ];
+
+    return {
+      summaryText:
+        "Markov sequence model learned transition probabilities between low, medium, and high emotional-energy states.",
+      keySignals,
+      modelSpecific: {
+        transition,
+        expectedNextEnergy: Number((payload.expectedNextEnergy ?? energyFromTransitionRow(neutralRow)).toFixed(6)),
+      },
+    };
   },
 };

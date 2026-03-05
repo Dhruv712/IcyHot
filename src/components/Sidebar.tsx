@@ -56,6 +56,20 @@ const NAV_ITEMS = [
     ),
   },
   {
+    href: "/predictive",
+    label: "Predictive",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 17.25h18M5.25 17.25V6.75m13.5 10.5V9.75" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="m7.5 14.25 3-3 2.25 2.25 3.75-4.5" />
+        <circle cx="7.5" cy="14.25" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="10.5" cy="11.25" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="12.75" cy="13.5" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="16.5" cy="9" r="0.9" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
     href: "/contacts",
     label: "People",
     icon: (

@@ -175,6 +175,7 @@ export async function scoreMemoriesForUser(userId: string): Promise<{
         activeModelKey: artifact.modelKey,
         activeModelVersion: artifact.modelVersion,
         lastTrainedAt: status?.lastTrainedAt ?? new Date(),
+        lastScoredAt: new Date(),
         framesCount: status?.framesCount ?? 0,
         updatedAt: new Date(),
       })
@@ -183,6 +184,7 @@ export async function scoreMemoriesForUser(userId: string): Promise<{
         set: {
           activeModelKey: artifact.modelKey,
           activeModelVersion: artifact.modelVersion,
+          lastScoredAt: new Date(),
           updatedAt: new Date(),
         },
       });

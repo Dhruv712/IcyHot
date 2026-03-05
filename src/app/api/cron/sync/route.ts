@@ -11,6 +11,7 @@ import { consolidateMemories } from "@/lib/memory/consolidate";
 import { generateProvocationsForUser } from "@/lib/memory/provoke";
 import { createConsolidationDigest } from "@/lib/memory/consolidationDigest";
 import { refreshPredictiveModelForUser } from "@/lib/predictive/pipeline";
+import { runPredictiveBenchmarkForUser } from "@/lib/predictive/benchmark";
 import {
   getDateStringInTimeZone,
 } from "@/lib/timezone";
@@ -59,6 +60,16 @@ export async function GET(request: NextRequest) {
       skipped?: string;
       error?: string;
     };
+    predictiveBenchmark: {
+      success: boolean;
+      runId?: string;
+      mode?: "quick";
+      checkpointSchedule?: number[];
+      frameCount?: number;
+      summary?: Record<string, unknown>;
+      skipped?: string;
+      error?: string;
+    };
   }> = [];
 
   for (const user of allUsers) {
@@ -78,6 +89,7 @@ export async function GET(request: NextRequest) {
       provocations: { success: false },
       healthSnapshot: { success: false },
       predictive: { success: false },
+      predictiveBenchmark: { success: false },
     };
 
     let hasNewContent = false;
@@ -128,11 +140,49 @@ export async function GET(request: NextRequest) {
         modelVersion: predictiveResult.modelVersion,
         skipped: predictiveResult.skipped,
       };
+
+      const benchmark = await runPredictiveBenchmarkForUser({
+        userId: user.id,
+        trigger: "nightly",
+        mode: "quick",
+      });
+
+      if (benchmark.ok) {
+        result.predictiveBenchmark = {
+          success: true,
+          runId: benchmark.runId,
+          mode: "quick",
+          checkpointSchedule: benchmark.checkpointSchedule,
+          frameCount: benchmark.frameCount,
+          summary: benchmark.summary,
+        };
+      } else if (benchmark.code === "insufficient_frames") {
+        result.predictiveBenchmark = {
+          success: true,
+          mode: "quick",
+          frameCount: benchmark.frameCount,
+          checkpointSchedule: benchmark.checkpointSchedule,
+          skipped: benchmark.message,
+        };
+      } else {
+        result.predictiveBenchmark = {
+          success: false,
+          mode: "quick",
+          frameCount: benchmark.frameCount,
+          checkpointSchedule: benchmark.checkpointSchedule,
+          error: benchmark.message,
+        };
+      }
     } catch (error) {
       console.error(`[cron] Predictive model refresh failed for ${user.id}:`, error);
       result.predictive = {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
+      };
+      result.predictiveBenchmark = {
+        success: false,
+        mode: "quick",
+        error: "Predictive refresh failed; benchmark skipped",
       };
     }
 
