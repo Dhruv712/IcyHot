@@ -10,6 +10,7 @@ import { getModel } from "./models/registry";
 import type { ModelArtifactEnvelope, PredictiveScore } from "./models/types";
 import { resolvePredictiveSelectionForUser } from "./config";
 import { scoreMemoriesForUser } from "./scoring";
+import { getPredictiveMinFrames } from "./settings";
 
 export type PredictiveMemoryMetadata = {
   score: number;
@@ -26,7 +27,7 @@ export type PredictiveRerankResult = {
   reason?: string;
 };
 
-const MIN_BACKFILL_FRAMES = 30;
+const MIN_BACKFILL_FRAMES = getPredictiveMinFrames();
 const BASE_WEIGHT = 0.72;
 const PREDICTIVE_WEIGHT = 0.28;
 
