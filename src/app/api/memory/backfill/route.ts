@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import {
+  consolidationDigests,
   memories,
+  memoryClusters,
   memoryConnections,
   memoryImplications,
   memorySyncState,
@@ -123,13 +125,49 @@ async function previewFullDerivedReset(userId: string): Promise<FullResetCounts>
 async function runFullDerivedReset(userId: string): Promise<FullResetCounts> {
   return db.transaction(async (tx) => {
     const counts = emptyResetCounts();
-    for (const target of FULL_RESET_TABLES) {
-      counts[target.key] = await deleteRowsForTable(
-        tx as unknown as SqlExecutor,
-        target.table,
-        userId,
-      );
-    }
+
+    const deletedImplications = await tx
+      .delete(memoryImplications)
+      .where(eq(memoryImplications.userId, userId))
+      .returning({ id: memoryImplications.id });
+    counts.memoryImplications = deletedImplications.length;
+
+    const deletedConnections = await tx
+      .delete(memoryConnections)
+      .where(eq(memoryConnections.userId, userId))
+      .returning({ id: memoryConnections.id });
+    counts.memoryConnections = deletedConnections.length;
+
+    const deletedClusters = await tx
+      .delete(memoryClusters)
+      .where(eq(memoryClusters.userId, userId))
+      .returning({ id: memoryClusters.id });
+    counts.memoryClusters = deletedClusters.length;
+
+    const deletedProvocations = await tx
+      .delete(provocations)
+      .where(eq(provocations.userId, userId))
+      .returning({ id: provocations.id });
+    counts.provocations = deletedProvocations.length;
+
+    const deletedMemories = await tx
+      .delete(memories)
+      .where(eq(memories.userId, userId))
+      .returning({ id: memories.id });
+    counts.memories = deletedMemories.length;
+
+    const deletedSyncState = await tx
+      .delete(memorySyncState)
+      .where(eq(memorySyncState.userId, userId))
+      .returning({ id: memorySyncState.id });
+    counts.memorySyncState = deletedSyncState.length;
+
+    const deletedDigests = await tx
+      .delete(consolidationDigests)
+      .where(eq(consolidationDigests.userId, userId))
+      .returning({ id: consolidationDigests.id });
+    counts.consolidationDigests = deletedDigests.length;
+
     counts.total = computeResetTotal(counts);
     return counts;
   });
