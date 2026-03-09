@@ -71,6 +71,13 @@
       "when": 1772685973742,
       "tag": "0009_predictive_benchmarks",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1773000000000,
+      "tag": "0010_predictive_benchmark_window_predictions",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import {
   journalStateFrames,
   predictiveBenchmarkPoints,
   predictiveBenchmarkRuns,
+  predictiveBenchmarkWindowPredictions,
   stateTransitionModels,
   userPredictiveStatus,
 } from "@/db/schema";
@@ -86,6 +87,16 @@ export type PredictiveBenchmarkRunHeader = {
 
 export type PredictiveBenchmarkRunDetail = PredictiveBenchmarkRunHeader & {
   points: PredictiveBenchmarkPointRecord[];
+  windowPredictions: PredictiveBenchmarkWindowPredictionRecord[];
+};
+
+export type PredictiveBenchmarkWindowPredictionRecord = {
+  checkpointSize: number;
+  sampleIndex: number;
+  targetEntryDate: string;
+  predictedVector: number[];
+  actualVector: number[];
+  baselineVector: number[];
 };
 
 export type PredictiveBenchmarkProgressEvent =
@@ -390,6 +401,19 @@ function mapPointRow(row: typeof predictiveBenchmarkPoints.$inferSelect): Predic
   };
 }
 
+function mapWindowPredictionRow(
+  row: typeof predictiveBenchmarkWindowPredictions.$inferSelect
+): PredictiveBenchmarkWindowPredictionRecord {
+  return {
+    checkpointSize: row.checkpointSize,
+    sampleIndex: row.sampleIndex,
+    targetEntryDate: row.targetEntryDate,
+    predictedVector: parseVector(row.predictedVectorJson),
+    actualVector: parseVector(row.actualVectorJson),
+    baselineVector: parseVector(row.baselineVectorJson),
+  };
+}
+
 function isMissingPredictiveStorage(error: unknown): boolean {
   const message =
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -397,6 +421,7 @@ function isMissingPredictiveStorage(error: unknown): boolean {
   return (
     message.includes("predictive_benchmark_runs") ||
     message.includes("predictive_benchmark_points") ||
+    message.includes("predictive_benchmark_window_predictions") ||
     message.includes("state_transition_models") ||
     message.includes("user_predictive_status") ||
     (message.includes("relation") && message.includes("does not exist")) ||
@@ -497,13 +522,17 @@ async function evaluateCheckpoint(params: {
   frames: PredictiveStateFrame[];
   config: Record<string, unknown>;
   sampleLimit: number;
-}): Promise<PredictiveBenchmarkPointRecord> {
+}): Promise<{
+  point: PredictiveBenchmarkPointRecord;
+  windowPredictions: PredictiveBenchmarkWindowPredictionRecord[];
+}> {
   const windows = buildSlidingWindows(params.frames, params.checkpointSize);
   const sampledWindows = downsampleDeterministically(windows, params.sampleLimit);
   const sampleCount = sampledWindows.length;
   const firstWindow = sampledWindows[0];
   const dimension = firstWindow?.target.vector.length ?? params.frames[0]?.vector.length ?? 0;
   const dimensions = createDimensionAccumulators(dimension);
+  const windowPredictions: PredictiveBenchmarkWindowPredictionRecord[] = [];
 
   let totalAbsError = 0;
   let totalSqError = 0;
@@ -512,7 +541,9 @@ async function evaluateCheckpoint(params: {
   let totalBaselineSqError = 0;
   let totalBaselineDirectionalHits = 0;
   let totalCount = 0;
-  for (const window of sampledWindows) {
+  for (let sampleIndex = 0; sampleIndex < sampledWindows.length; sampleIndex++) {
+    const window = sampledWindows[sampleIndex];
+    if (!window) continue;
     const artifact = await params.adapter.train(window.history, params.config);
     const handle = params.adapter.load(artifact);
     const previous = window.history.at(-1)?.vector ?? [];
@@ -521,6 +552,15 @@ async function evaluateCheckpoint(params: {
     const baseline = ensureLength(previous, dimension, previous);
     const actual = ensureLength(window.target.vector, dimension, previous);
     const previousAligned = ensureLength(previous, dimension, previous);
+
+    windowPredictions.push({
+      checkpointSize: params.checkpointSize,
+      sampleIndex,
+      targetEntryDate: window.target.entryDate,
+      predictedVector: predicted.map(round),
+      actualVector: actual.map(round),
+      baselineVector: baseline.map(round),
+    });
 
     for (let index = 0; index < dimension; index++) {
       const predictedValue = predicted[index];
@@ -600,19 +640,22 @@ async function evaluateCheckpoint(params: {
   });
 
   return {
-    checkpointSize: params.checkpointSize,
-    sampleCount,
-    mae: round(mae),
-    mse: round(mse),
-    directionalHitRate: round(clamp(directionalHitRate, 0, 1)),
-    baselineMae: round(baselineMae),
-    baselineMse: round(baselineMse),
-    baselineDirectionalHitRate: round(clamp(baselineDirectionalHitRate, 0, 1)),
-    maeGainPct: round(maeGainPct),
-    directionalGainPct: round(directionalGainPct),
-    perDimension: {
-      dimensions: perDimension,
+    point: {
+      checkpointSize: params.checkpointSize,
+      sampleCount,
+      mae: round(mae),
+      mse: round(mse),
+      directionalHitRate: round(clamp(directionalHitRate, 0, 1)),
+      baselineMae: round(baselineMae),
+      baselineMse: round(baselineMse),
+      baselineDirectionalHitRate: round(clamp(baselineDirectionalHitRate, 0, 1)),
+      maeGainPct: round(maeGainPct),
+      directionalGainPct: round(directionalGainPct),
+      perDimension: {
+        dimensions: perDimension,
+      },
     },
+    windowPredictions,
   };
 }
 
@@ -677,10 +720,11 @@ export async function runPredictiveBenchmarkForUser(params: {
       })
       .returning({ id: predictiveBenchmarkRuns.id });
     runId = runRow.id;
+    const persistedRunId = runRow.id;
 
     params.onProgress?.({
       type: "run_started",
-      runId,
+      runId: persistedRunId,
       mode: params.mode,
       trigger: params.trigger,
       frameCount,
@@ -696,13 +740,13 @@ export async function runPredictiveBenchmarkForUser(params: {
       const checkpointSize = checkpointSchedule[index];
       params.onProgress?.({
         type: "checkpoint_started",
-        runId,
+        runId: persistedRunId,
         checkpointSize,
         checkpointIndex: index,
         checkpointTotal: checkpointSchedule.length,
       });
 
-      const point = await evaluateCheckpoint({
+      const { point, windowPredictions } = await evaluateCheckpoint({
         adapter,
         checkpointSize,
         frames,
@@ -713,7 +757,7 @@ export async function runPredictiveBenchmarkForUser(params: {
       points.push(point);
 
       await db.insert(predictiveBenchmarkPoints).values({
-        runId,
+        runId: persistedRunId,
         userId: params.userId,
         checkpointSize: point.checkpointSize,
         sampleCount: point.sampleCount,
@@ -729,9 +773,26 @@ export async function runPredictiveBenchmarkForUser(params: {
         createdAt: new Date(),
       });
 
+      if (windowPredictions.length > 0) {
+        const createdAt = new Date();
+        await db.insert(predictiveBenchmarkWindowPredictions).values(
+          windowPredictions.map((windowPrediction) => ({
+            runId: persistedRunId,
+            userId: params.userId,
+            checkpointSize: point.checkpointSize,
+            sampleIndex: windowPrediction.sampleIndex,
+            targetEntryDate: windowPrediction.targetEntryDate,
+            predictedVectorJson: windowPrediction.predictedVector,
+            actualVectorJson: windowPrediction.actualVector,
+            baselineVectorJson: windowPrediction.baselineVector,
+            createdAt,
+          }))
+        );
+      }
+
       params.onProgress?.({
         type: "checkpoint_complete",
-        runId,
+        runId: persistedRunId,
         checkpointSize,
         checkpointIndex: index,
         checkpointTotal: checkpointSchedule.length,
@@ -762,18 +823,18 @@ export async function runPredictiveBenchmarkForUser(params: {
         summaryJson: summary,
         errorMessage: null,
       })
-      .where(eq(predictiveBenchmarkRuns.id, runId));
+      .where(eq(predictiveBenchmarkRuns.id, persistedRunId));
 
     params.onProgress?.({
       type: "complete",
-      runId,
+      runId: persistedRunId,
       durationMs,
       summary,
     });
 
     return {
       ok: true,
-      runId,
+      runId: persistedRunId,
       frameCount,
       checkpointSchedule,
       sampleLimit,
@@ -843,6 +904,7 @@ export async function listPredictiveBenchmarkRunsForUser(params: {
 export async function getPredictiveBenchmarkRunForUser(params: {
   userId: string;
   runId: string;
+  includeWindowPredictions?: boolean;
 }): Promise<PredictiveBenchmarkRunDetail | null> {
   const [runRow] = await db
     .select()
@@ -868,9 +930,27 @@ export async function getPredictiveBenchmarkRunForUser(params: {
     )
     .orderBy(predictiveBenchmarkPoints.checkpointSize);
 
+  let windowPredictionRows: typeof predictiveBenchmarkWindowPredictions.$inferSelect[] = [];
+  if (params.includeWindowPredictions !== false) {
+    windowPredictionRows = await db
+      .select()
+      .from(predictiveBenchmarkWindowPredictions)
+      .where(
+        and(
+          eq(predictiveBenchmarkWindowPredictions.runId, params.runId),
+          eq(predictiveBenchmarkWindowPredictions.userId, params.userId)
+        )
+      )
+      .orderBy(
+        predictiveBenchmarkWindowPredictions.checkpointSize,
+        predictiveBenchmarkWindowPredictions.sampleIndex
+      );
+  }
+
   return {
     ...mapRunHeader(runRow),
     points: pointRows.map(mapPointRow),
+    windowPredictions: windowPredictionRows.map(mapWindowPredictionRow),
   };
 }
 
@@ -909,7 +989,11 @@ export async function getPredictiveOverviewForUser(userId: string): Promise<Pred
   const recentRuns = await listPredictiveBenchmarkRunsForUser({ userId, limit: 12, offset: 0 });
   const latestRunId = recentRuns[0]?.id;
   const latestRun = latestRunId
-    ? await getPredictiveBenchmarkRunForUser({ userId, runId: latestRunId })
+    ? await getPredictiveBenchmarkRunForUser({
+        userId,
+        runId: latestRunId,
+        includeWindowPredictions: false,
+      })
     : null;
 
   return {

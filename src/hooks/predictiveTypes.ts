@@ -43,6 +43,16 @@ export type PredictiveBenchmarkRun = {
   errorMessage: string | null;
   createdAt: string;
   points?: PredictiveBenchmarkPoint[];
+  windowPredictions?: PredictiveBenchmarkWindowPrediction[];
+};
+
+export type PredictiveBenchmarkWindowPrediction = {
+  checkpointSize: number;
+  sampleIndex: number;
+  targetEntryDate: string;
+  predictedVector: number[];
+  actualVector: number[];
+  baselineVector: number[];
 };
 
 export type PredictiveOverview = {

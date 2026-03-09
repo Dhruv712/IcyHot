@@ -6,6 +6,7 @@ import BenchmarkCurve from "@/components/predictive/BenchmarkCurve";
 import BenchmarkHistoryTable from "@/components/predictive/BenchmarkHistoryTable";
 import BenchmarkRunControls from "@/components/predictive/BenchmarkRunControls";
 import CheckpointInspector from "@/components/predictive/CheckpointInspector";
+import DimensionPredictionTimeline from "@/components/predictive/DimensionPredictionTimeline";
 import LearningSummaryCard from "@/components/predictive/LearningSummaryCard";
 import PredictiveStatusCard from "@/components/predictive/PredictiveStatusCard";
 import {
@@ -159,6 +160,8 @@ export default function PredictivePlaygroundPage() {
               />
               <CheckpointInspector run={activeRun} point={selectedPoint} />
             </div>
+
+            <DimensionPredictionTimeline run={activeRun} selectedCheckpoint={selectedCheckpoint} />
           </>
         )}
       </div>

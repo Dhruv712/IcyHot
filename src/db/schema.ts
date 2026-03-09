@@ -507,6 +507,41 @@ export const predictiveBenchmarkPoints = pgTable(
   ]
 );
 
+export const predictiveBenchmarkWindowPredictions = pgTable(
+  "predictive_benchmark_window_predictions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    runId: uuid("run_id")
+      .references(() => predictiveBenchmarkRuns.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    checkpointSize: integer("checkpoint_size").notNull(),
+    sampleIndex: integer("sample_index").notNull(),
+    targetEntryDate: date("target_entry_date").notNull(),
+    predictedVectorJson: jsonb("predicted_vector_json").$type<number[]>().notNull(),
+    actualVectorJson: jsonb("actual_vector_json").$type<number[]>().notNull(),
+    baselineVectorJson: jsonb("baseline_vector_json").$type<number[]>().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("predictive_benchmark_window_predictions_run_checkpoint_sample_idx").on(
+      table.runId,
+      table.checkpointSize,
+      table.sampleIndex
+    ),
+    index("predictive_benchmark_window_predictions_user_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    index("predictive_benchmark_window_predictions_run_checkpoint_idx").on(
+      table.runId,
+      table.checkpointSize
+    ),
+  ]
+);
+
 // ── Daily Suggestions ──────────────────────────────────────────────────
 
 export const dailySuggestions = pgTable(
