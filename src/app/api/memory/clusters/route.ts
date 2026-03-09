@@ -84,7 +84,7 @@ export async function GET() {
   // 2. Compute fresh clusters
   try {
     const allMemories = await db.execute(sql`
-      SELECT id, content, embedding::text as embedding_text,
+      SELECT id, content, semantic_content, embedding::text as embedding_text,
              contact_ids, source, strength
       FROM memories
       WHERE user_id = ${userId} AND embedding IS NOT NULL
@@ -109,6 +109,9 @@ export async function GET() {
             id: row.id,
             embedding,
             content: row.content,
+            semanticContent: typeof row.semantic_content === "string" && row.semantic_content.trim().length > 0
+              ? row.semantic_content
+              : row.content,
             contactIds: row.contact_ids ? JSON.parse(row.contact_ids) : [],
             source: row.source,
             strength: row.strength ?? 1,

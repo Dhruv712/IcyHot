@@ -8,29 +8,87 @@ import { memories } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { embedTexts } from "./embed";
 import { generateAbstractEmbedding } from "./abstract";
-import type { ExtractedMemory } from "./extract";
+import {
+  MEMORY_ROLE_TAGS,
+  type ExtractedMemory,
+  type MemoryRoleTag,
+} from "./extract";
 import type { JournalMentionReference } from "@/lib/journalRichText";
 
 const SIMILARITY_THRESHOLD = 0.92;
+
+interface ContactRef {
+  id: string;
+  name: string;
+  relationshipType?: MemoryRoleTag;
+}
+
+interface ResolvedContacts {
+  contactIds: string[];
+  nameToContactId: Map<string, string>;
+  mentionNamesFromContent: string[];
+}
+
+interface MemoryPersonMetadata {
+  name: string;
+  contactId: string | null;
+  role: MemoryRoleTag;
+}
+
+interface MemoryMetadataJson {
+  people: MemoryPersonMetadata[];
+  roleTags: MemoryRoleTag[];
+  locationHints?: string[];
+  temporalHints?: string[];
+  semanticFallback?: boolean;
+}
+
+function normalizeRoleTag(value: unknown): MemoryRoleTag {
+  const normalized =
+    typeof value === "string"
+      ? value.trim().toLowerCase().replace(/[\s-]+/g, "_")
+      : "";
+
+  return MEMORY_ROLE_TAGS.includes(normalized as MemoryRoleTag)
+    ? (normalized as MemoryRoleTag)
+    : "other";
+}
+
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function uniqueNames(values: string[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function firstNameToken(name: string): string {
+  return normalizeName(name).split(/\s+/)[0] ?? "";
+}
 
 export async function storeMemories(
   userId: string,
   extracted: ExtractedMemory[],
   entryDate: string,
-  contacts: { id: string; name: string }[],
+  contacts: ContactRef[],
   explicitMentions: JournalMentionReference[] = [],
 ): Promise<{ created: number; reinforced: number }> {
   if (extracted.length === 0) return { created: 0, reinforced: 0 };
 
-  // 1. Embed all memory texts in batch
-  const texts = extracted.map((m) => m.content);
+  // Embed semantic text only so geometry is metadata-debiased.
+  const texts = extracted.map((m) => m.semanticContent || m.content);
   const embeddings = await embedTexts(texts);
 
   let created = 0;
   let reinforced = 0;
 
-  // 2. For each memory, check for semantic duplicates and insert/reinforce
-  //    Run in parallel batches of 5 to speed up within Vercel's 60s limit
+  // Run in parallel batches of 5 to stay within API time limits.
   const BATCH_SIZE = 5;
   for (let start = 0; start < extracted.length; start += BATCH_SIZE) {
     const batch = extracted.slice(start, start + BATCH_SIZE);
@@ -43,25 +101,26 @@ export async function storeMemories(
           entryDate,
           contacts,
           explicitMentions,
-        )
-      )
+        ),
+      ),
     );
+
     for (let k = 0; k < results.length; k++) {
-      const r = results[k];
-      if (r.status === "fulfilled") {
-        if (r.value === "created") created++;
-        else if (r.value === "reinforced") reinforced++;
+      const result = results[k];
+      if (result.status === "fulfilled") {
+        if (result.value === "created") created++;
+        else if (result.value === "reinforced") reinforced++;
       } else {
         console.error(
-          `[memory-store] Failed to store memory: "${batch[k].content.slice(0, 50)}..."`,
-          r.reason
+          `[memory-store] Failed to store memory: "${batch[k].content.slice(0, 80)}..."`,
+          result.reason,
         );
       }
     }
   }
 
   console.log(
-    `[memory-store] Stored ${created} new, reinforced ${reinforced} existing`
+    `[memory-store] Stored ${created} new, reinforced ${reinforced} existing`,
   );
   return { created, reinforced };
 }
@@ -71,10 +130,10 @@ async function storeOneMemory(
   memory: ExtractedMemory,
   embedding: number[],
   entryDate: string,
-  contacts: { id: string; name: string }[],
+  contacts: ContactRef[],
   explicitMentions: JournalMentionReference[],
 ): Promise<"created" | "reinforced" | "skipped"> {
-  // Check for semantic duplicates using cosine similarity
+  // Check for semantic duplicates using cosine similarity on semantic embedding.
   const similar = await db.execute(sql`
     SELECT id, content, 1 - (embedding <=> ${sql.raw(`'[${embedding.join(",")}]'`)}::vector) as similarity
     FROM memories
@@ -92,7 +151,6 @@ async function storeOneMemory(
   }>;
 
   if (rows.length > 0) {
-    // Reinforce existing memory
     const existing = rows[0];
     await db
       .update(memories)
@@ -104,29 +162,82 @@ async function storeOneMemory(
       .where(eq(memories.id, existing.id));
 
     console.log(
-      `[memory-store] Reinforced (sim=${rows[0].similarity.toFixed(3)}): "${existing.content.slice(0, 60)}..."`
+      `[memory-store] Reinforced (sim=${rows[0].similarity.toFixed(3)}): "${existing.content.slice(0, 80)}..."`,
     );
     return "reinforced";
   }
 
-  // Resolve contact names → IDs
-  const contactIds = resolveContactIds(
+  const resolvedContacts = resolveContacts(
     memory.peopleInvolvedNames,
     memory.content,
     contacts,
     explicitMentions,
   );
 
-  // Insert new memory
+  const roleHintByName = new Map<string, MemoryRoleTag>();
+  for (const hint of memory.peopleRoleHints ?? []) {
+    const key = normalizeName(hint.name);
+    if (!key) continue;
+    roleHintByName.set(key, normalizeRoleTag(hint.role));
+  }
+
+  const relationshipRoleByContactId = new Map<string, MemoryRoleTag>();
+  for (const contact of contacts) {
+    relationshipRoleByContactId.set(
+      contact.id,
+      normalizeRoleTag(contact.relationshipType),
+    );
+  }
+
+  const metadataNames = uniqueNames([
+    ...memory.peopleInvolvedNames,
+    ...(memory.peopleRoleHints ?? []).map((hint) => hint.name),
+    ...resolvedContacts.mentionNamesFromContent,
+  ]);
+
+  const people: MemoryPersonMetadata[] = metadataNames.map((name) => {
+    const key = normalizeName(name);
+    const contactId = resolvedContacts.nameToContactId.get(key) ?? null;
+    const hintRole = roleHintByName.get(key) ?? "other";
+    const relationshipRole = contactId
+      ? relationshipRoleByContactId.get(contactId)
+      : undefined;
+
+    return {
+      name,
+      contactId,
+      role: relationshipRole ?? hintRole ?? "other",
+    };
+  });
+
+  const metadata: MemoryMetadataJson = {
+    people,
+    roleTags: Array.from(new Set(people.map((person) => person.role))),
+    ...(memory.locationHints?.length
+      ? { locationHints: uniqueNames(memory.locationHints).slice(0, 6) }
+      : {}),
+    ...(memory.temporalHints?.length
+      ? { temporalHints: uniqueNames(memory.temporalHints).slice(0, 6) }
+      : {}),
+    ...(memory.semanticFallback ? { semanticFallback: true } : {}),
+  };
+
   const [inserted] = await db
     .insert(memories)
     .values({
       userId,
       content: memory.content,
+      semanticContent: memory.semanticContent,
       embedding,
+      abstractEmbedding: null,
+      metadataJson: metadata as unknown as Record<string, unknown>,
+      extractionVersion: "v2",
       source: "journal",
       sourceDate: entryDate,
-      contactIds: contactIds.length > 0 ? JSON.stringify(contactIds) : null,
+      contactIds:
+        resolvedContacts.contactIds.length > 0
+          ? JSON.stringify(resolvedContacts.contactIds)
+          : null,
       strength:
         memory.significance === "high"
           ? 1.5
@@ -138,7 +249,7 @@ async function storeOneMemory(
     })
     .returning({ id: memories.id });
 
-  // Fire-and-forget: generate abstract embedding (non-blocking)
+  // Fire-and-forget: abstract embedding remains derived from display text.
   generateAbstractEmbedding(memory.content).then((abstractEmb) => {
     if (abstractEmb && inserted) {
       db.update(memories)
@@ -146,11 +257,11 @@ async function storeOneMemory(
         .where(eq(memories.id, inserted.id))
         .then(() =>
           console.log(
-            `[memory-store] Abstract embedding saved for "${memory.content.slice(0, 40)}..."`
-          )
+            `[memory-store] Abstract embedding saved for "${memory.content.slice(0, 60)}..."`,
+          ),
         )
         .catch((err) =>
-          console.error(`[memory-store] Failed to save abstract embedding:`, err)
+          console.error(`[memory-store] Failed to save abstract embedding:`, err),
         );
     }
   });
@@ -158,63 +269,89 @@ async function storeOneMemory(
   return "created";
 }
 
-function resolveContactIds(
+function resolveContacts(
   peopleInvolvedNames: string[],
   memoryContent: string,
-  contacts: { id: string; name: string }[],
+  contacts: ContactRef[],
   explicitMentions: JournalMentionReference[],
-): string[] {
+): ResolvedContacts {
   const ids = new Set<string>();
+  const nameToContactId = new Map<string, string>();
+
   const explicitByLabel = new Map(
-    explicitMentions.map((mention) => [mention.label.toLowerCase(), mention]),
+    explicitMentions.map((mention) => [normalizeName(mention.label), mention]),
   );
   const explicitByFirstName = new Map<string, JournalMentionReference[]>();
-
   for (const mention of explicitMentions) {
-    const firstName = mention.label.toLowerCase().split(/\s+/)[0];
+    const firstName = firstNameToken(mention.label);
     const bucket = explicitByFirstName.get(firstName) ?? [];
     bucket.push(mention);
     explicitByFirstName.set(firstName, bucket);
   }
 
-  for (const name of peopleInvolvedNames ?? []) {
-    const nameLower = name.toLowerCase().trim();
+  const contactsByExactName = new Map(
+    contacts.map((contact) => [normalizeName(contact.name), contact]),
+  );
+  const contactsByFirstName = new Map<string, ContactRef[]>();
+  for (const contact of contacts) {
+    const firstName = firstNameToken(contact.name);
+    const bucket = contactsByFirstName.get(firstName) ?? [];
+    bucket.push(contact);
+    contactsByFirstName.set(firstName, bucket);
+  }
+
+  const candidateNames = uniqueNames(peopleInvolvedNames);
+  const mentionNamesFromContent: string[] = [];
+  const memoryLower = memoryContent.toLowerCase();
+
+  for (const mention of explicitMentions) {
+    if (memoryLower.includes(normalizeName(mention.label))) {
+      ids.add(mention.contactId);
+      mentionNamesFromContent.push(mention.label);
+      nameToContactId.set(normalizeName(mention.label), mention.contactId);
+    }
+  }
+
+  for (const name of candidateNames) {
+    const nameLower = normalizeName(name);
+    if (!nameLower) continue;
+
+    // 1) Explicit mention exact label
     const explicitExact = explicitByLabel.get(nameLower);
     if (explicitExact) {
       ids.add(explicitExact.contactId);
+      nameToContactId.set(nameLower, explicitExact.contactId);
       continue;
     }
 
-    const firstName = nameLower.split(/\s+/)[0];
-    const explicitFirstMatches = explicitByFirstName.get(firstName) ?? [];
-    if (explicitFirstMatches.length === 1) {
-      ids.add(explicitFirstMatches[0].contactId);
+    // 2) Explicit mention unique first-name match
+    const first = firstNameToken(name);
+    const explicitFirst = explicitByFirstName.get(first) ?? [];
+    if (explicitFirst.length === 1) {
+      ids.add(explicitFirst[0].contactId);
+      nameToContactId.set(nameLower, explicitFirst[0].contactId);
       continue;
     }
 
-    // Try exact match first
-    const exact = contacts.find((c) => c.name.toLowerCase() === nameLower);
-    if (exact) {
-      ids.add(exact.id);
+    // 3) Contact exact full-name match
+    const contactExact = contactsByExactName.get(nameLower);
+    if (contactExact) {
+      ids.add(contactExact.id);
+      nameToContactId.set(nameLower, contactExact.id);
       continue;
     }
 
-    // Try first-name match (if the contact list name contains the given name)
-    const partial = contacts.find((c) => {
-      const parts = c.name.toLowerCase().split(/\s+/);
-      return parts.some((p) => p === nameLower);
-    });
-    if (partial) {
-      ids.add(partial.id);
+    // 4) Contact unique first-name match
+    const contactFirst = contactsByFirstName.get(first) ?? [];
+    if (contactFirst.length === 1) {
+      ids.add(contactFirst[0].id);
+      nameToContactId.set(nameLower, contactFirst[0].id);
     }
   }
 
-  const memoryLower = memoryContent.toLowerCase();
-  for (const mention of explicitMentions) {
-    if (memoryLower.includes(mention.label.toLowerCase())) {
-      ids.add(mention.contactId);
-    }
-  }
-
-  return [...ids];
+  return {
+    contactIds: Array.from(ids),
+    nameToContactId,
+    mentionNamesFromContent: uniqueNames(mentionNamesFromContent),
+  };
 }

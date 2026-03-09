@@ -6,11 +6,12 @@
 
 import { db } from "@/db";
 import {
+  contacts,
   memories,
   memoryConnections,
   memoryImplications,
 } from "@/db/schema";
-import { eq, sql, and, or } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import { embedSingle } from "./embed";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -57,6 +58,8 @@ const DEFAULT_MAX_MEMORIES = 20;
 const DEFAULT_MAX_HOPS = 2;
 const DEFAULT_MIN_STRENGTH = 0.1;
 const SEED_COUNT = 10; // Top K seeds from vector search
+const CONTACT_QUERY_SEED_COUNT = 6; // Extra seeds from matched contacts
+const CONTACT_QUERY_BOOST = 1.3; // Score multiplier for contact-matched memories
 const HOP_DISCOUNT = 0.5; // Each hop reduces activation by 50%
 const HEBBIAN_DELTA = 0.05; // Smaller delta for retrieval co-activation (vs 0.1 for consolidation)
 
@@ -276,6 +279,141 @@ function deduplicateImplicationsByContent(
   return kept.map((k) => k.impl);
 }
 
+// ── Contact-aware query helpers ───────────────────────────────────────
+
+interface SeedRow {
+  id: string;
+  content: string;
+  strength: number;
+  activation_count: number;
+  contact_ids: string | null;
+  source_date: string;
+  last_activated_at: string;
+  similarity: number;
+}
+
+function parseContactIds(contactIdsRaw: string | null): string[] {
+  if (!contactIdsRaw) return [];
+  try {
+    const parsed = JSON.parse(contactIdsRaw);
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasContactOverlap(
+  memoryContactIds: string[],
+  boostedContactIds: Set<string>
+): boolean {
+  if (boostedContactIds.size === 0 || memoryContactIds.length === 0) return false;
+  return memoryContactIds.some((contactId) => boostedContactIds.has(contactId));
+}
+
+function applyContactBoost(
+  baseScore: number,
+  memoryContactIds: string[],
+  boostedContactIds: Set<string>
+): number {
+  return hasContactOverlap(memoryContactIds, boostedContactIds)
+    ? baseScore * CONTACT_QUERY_BOOST
+    : baseScore;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function mergeSeedRows(primary: SeedRow[], extra: SeedRow[]): SeedRow[] {
+  const merged = new Map<string, SeedRow>();
+  for (const row of primary) {
+    merged.set(row.id, row);
+  }
+  for (const row of extra) {
+    const existing = merged.get(row.id);
+    if (!existing || row.similarity > existing.similarity) {
+      merged.set(row.id, row);
+    }
+  }
+  return Array.from(merged.values());
+}
+
+async function detectQueryContactIds(
+  userId: string,
+  query: string
+): Promise<string[]> {
+  const normalizedQuery = query.toLowerCase();
+  const queryTokens = new Set(
+    normalizedQuery
+      .replace(/[^a-z0-9\s'-]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+
+  const userContacts = await db
+    .select({ id: contacts.id, name: contacts.name })
+    .from(contacts)
+    .where(eq(contacts.userId, userId));
+
+  if (userContacts.length === 0) return [];
+
+  const firstNameCounts = new Map<string, number>();
+  for (const contact of userContacts) {
+    const firstName = contact.name.toLowerCase().trim().split(/\s+/)[0];
+    if (!firstName) continue;
+    firstNameCounts.set(firstName, (firstNameCounts.get(firstName) ?? 0) + 1);
+  }
+
+  const matched = new Set<string>();
+  for (const contact of userContacts) {
+    const fullName = contact.name.toLowerCase().trim();
+    if (!fullName) continue;
+
+    const fullNamePattern = new RegExp(`\\b${escapeRegExp(fullName)}\\b`, "i");
+    if (fullNamePattern.test(normalizedQuery)) {
+      matched.add(contact.id);
+      continue;
+    }
+
+    const firstName = fullName.split(/\s+/)[0];
+    const isUniqueFirstName = (firstNameCounts.get(firstName) ?? 0) === 1;
+    if (isUniqueFirstName && firstName.length >= 3 && queryTokens.has(firstName)) {
+      matched.add(contact.id);
+    }
+  }
+
+  return Array.from(matched);
+}
+
+async function findContactNameSeeds(
+  userId: string,
+  queryEmbedding: number[],
+  contactIds: string[]
+): Promise<SeedRow[]> {
+  if (contactIds.length === 0) return [];
+
+  const contactPredicates = sql.join(
+    contactIds.map((contactId) => sql`contact_ids LIKE ${"%" + contactId + "%"}`),
+    sql` OR `
+  );
+
+  const rows = await db.execute(sql`
+    SELECT
+      id, content, strength, activation_count, contact_ids, source_date, last_activated_at,
+      1 - (embedding <=> ${sql.raw(`'[${queryEmbedding.join(",")}]'`)}::vector) as similarity
+    FROM memories
+    WHERE user_id = ${userId}
+      AND embedding IS NOT NULL
+      AND (${contactPredicates})
+    ORDER BY similarity DESC
+    LIMIT ${CONTACT_QUERY_SEED_COUNT}
+  `);
+
+  return rows.rows as unknown as SeedRow[];
+}
+
 // ── Main retrieval function ────────────────────────────────────────────
 
 export async function retrieveMemories(
@@ -298,6 +436,12 @@ export async function retrieveMemories(
 
   // 1. Embed the query
   const queryEmbedding = await embedSingle(query);
+  const queryMatchedContactIds = options?.contactFilter
+    ? [options.contactFilter]
+    : await detectQueryContactIds(userId, query);
+  const contactBoostIds = options?.contactFilter
+    ? new Set<string>()
+    : new Set(queryMatchedContactIds);
 
   // 2. Find seed memories (direct vector similarity)
   const seedQuery = sql`
@@ -314,16 +458,14 @@ export async function retrieveMemories(
 
   const seedRows = (
     await db.execute(seedQuery)
-  ).rows as Array<{
-    id: string;
-    content: string;
-    strength: number;
-    activation_count: number;
-    contact_ids: string | null;
-    source_date: string;
-    last_activated_at: string;
-    similarity: number;
-  }>;
+  ).rows as unknown as SeedRow[];
+
+  const contactSeedRows =
+    options?.contactFilter || queryMatchedContactIds.length === 0
+      ? []
+      : await findContactNameSeeds(userId, queryEmbedding, queryMatchedContactIds);
+
+  const allSeedRows = mergeSeedRows(seedRows, contactSeedRows);
 
   // Track all activated memories with their scores
   const activatedMap = new Map<
@@ -342,10 +484,13 @@ export async function retrieveMemories(
   >();
 
   // Count connections per memory for decay calculation
-  const connectionCounts = await getConnectionCounts(userId, seedRows.map((r) => r.id));
+  const connectionCounts = await getConnectionCounts(
+    userId,
+    allSeedRows.map((r) => r.id)
+  );
 
   // Process seeds (hop 0)
-  for (const row of seedRows) {
+  for (const row of allSeedRows) {
     const connCount = connectionCounts.get(row.id) ?? 0;
     const decayedStrength = effectiveStrength(
       row.strength,
@@ -355,13 +500,18 @@ export async function retrieveMemories(
 
     if (decayedStrength < minStrength) continue;
 
-    const activationScore = row.similarity * decayedStrength;
+    const rowContactIds = parseContactIds(row.contact_ids);
+    const activationScore = applyContactBoost(
+      row.similarity * decayedStrength,
+      rowContactIds,
+      contactBoostIds
+    );
 
     activatedMap.set(row.id, {
       id: row.id,
       content: row.content,
       strength: decayedStrength,
-      contactIds: row.contact_ids ? JSON.parse(row.contact_ids) : [],
+      contactIds: rowContactIds,
       sourceDate: row.source_date,
       activationScore,
       hop: 0,
@@ -434,23 +584,24 @@ export async function retrieveMemories(
 
       if (decayedStrength < minStrength) continue;
 
+      const neighborContactIds = parseContactIds(neighbor.contactIds);
+
       // Apply contact filter
       if (options?.contactFilter) {
-        const nContactIds = neighbor.contactIds
-          ? JSON.parse(neighbor.contactIds)
-          : [];
-        if (!nContactIds.includes(options.contactFilter)) continue;
+        if (!neighborContactIds.includes(options.contactFilter)) continue;
       }
 
       activatedMap.set(neighborId, {
         id: neighbor.id,
         content: neighbor.content,
         strength: decayedStrength,
-        contactIds: neighbor.contactIds
-          ? JSON.parse(neighbor.contactIds)
-          : [],
+        contactIds: neighborContactIds,
         sourceDate: neighbor.sourceDate,
-        activationScore: propagatedScore,
+        activationScore: applyContactBoost(
+          propagatedScore,
+          neighborContactIds,
+          contactBoostIds
+        ),
         hop,
         connectionCount: nConnCount,
         lastActivatedAt: neighbor.lastActivatedAt,
@@ -533,7 +684,12 @@ export async function retrieveMemories(
 
         if (decayedStrength < minStrength) continue;
 
-        const activationScore = impl.similarity * decayedStrength * 0.3; // 0.3x discount for implication-bridged
+        const bridgedContactIds = parseContactIds(bridged.contactIds);
+        const activationScore = applyContactBoost(
+          impl.similarity * decayedStrength * 0.3, // 0.3x discount for implication-bridged
+          bridgedContactIds,
+          contactBoostIds
+        );
 
         activatedIds.add(sourceId);
         implicationBridgedMemories.push({
@@ -541,9 +697,7 @@ export async function retrieveMemories(
           content: bridged.content,
           strength: decayedStrength,
           activationScore,
-          contactIds: bridged.contactIds
-            ? JSON.parse(bridged.contactIds)
-            : [],
+          contactIds: bridgedContactIds,
           sourceDate: bridged.sourceDate,
           hop: -1, // Special marker for implication-bridged
           viaImplication: impl.content,

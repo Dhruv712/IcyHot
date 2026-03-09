@@ -78,6 +78,13 @@
       "when": 1773000000000,
       "tag": "0010_predictive_benchmark_window_predictions",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1773100000000,
+      "tag": "0011_memory_semantics_v2",
+      "breakpoints": true
     }
   ]
 }

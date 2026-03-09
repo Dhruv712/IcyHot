@@ -694,8 +694,11 @@ export const memories = pgTable(
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
     content: text("content").notNull(),
+    semanticContent: text("semantic_content"),
     embedding: vector("embedding", { dimensions: 1024 }), // Voyage voyage-3
     abstractEmbedding: vector("abstract_embedding", { dimensions: 1024 }), // Abstract/structural embedding (names/dates stripped)
+    metadataJson: jsonb("metadata_json").$type<Record<string, unknown>>().default({}).notNull(),
+    extractionVersion: text("extraction_version").default("v1").notNull(),
     source: text("source").notNull(), // "journal" | "calendar" | "interaction"
     sourceDate: date("source_date").notNull(),
     contactIds: text("contact_ids"), // JSON array of related contact UUIDs

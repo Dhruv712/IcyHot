@@ -56,7 +56,11 @@ export async function processMemories(
 
   // 3. Get all contacts for name resolution
   const allContacts = await db
-    .select({ id: contacts.id, name: contacts.name })
+    .select({
+      id: contacts.id,
+      name: contacts.name,
+      relationshipType: contacts.relationshipType,
+    })
     .from(contacts)
     .where(eq(contacts.userId, userId));
 

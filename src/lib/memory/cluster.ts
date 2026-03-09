@@ -25,6 +25,7 @@ export interface MemoryPoint {
   id: string;
   embedding: number[];
   content: string;
+  semanticContent: string;
   contactIds: string[];
   source: string;
   strength: number;
@@ -257,7 +258,7 @@ function autoLabelAll(
     const clusterVocab = new Set<string>();
 
     for (const m of members) {
-      const words = tokenize(m.content);
+      const words = tokenize(m.semanticContent || m.content);
       const seen = new Set<string>();
       for (const w of words) {
         if (!seen.has(w)) {
