@@ -30,6 +30,13 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function formatValueLabel(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  if (Math.abs(value) >= 1) return value.toFixed(2);
+  if (Math.abs(value) >= 0.1) return value.toFixed(3);
+  return value.toFixed(4);
+}
+
 function formatDateLabel(value: string): string {
   const parsed = new Date(`${value}T12:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return value;
@@ -127,8 +134,27 @@ export default function DimensionPredictionTimeline({
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
 
-  const yMin = 0;
-  const yMax = 1;
+  const allValues = timeline.flatMap((point) => [point.actual, point.predicted, point.baseline]);
+  const observedMin = Math.min(...allValues);
+  const observedMax = Math.max(...allValues);
+  const observedRange = observedMax - observedMin;
+  const minSpan = 0.06;
+  const paddedRange = Math.max(observedRange, minSpan);
+  const padding = paddedRange * 0.14;
+  let yMin = observedMin - padding;
+  let yMax = observedMax + padding;
+  if (yMax - yMin < minSpan) {
+    const midpoint = (yMin + yMax) / 2;
+    yMin = midpoint - minSpan / 2;
+    yMax = midpoint + minSpan / 2;
+  }
+  yMin = clamp(yMin, 0, 1);
+  yMax = clamp(yMax, 0, 1);
+  if (Math.abs(yMax - yMin) < 1e-6) {
+    yMin = clamp(yMin - 0.03, 0, 1);
+    yMax = clamp(yMax + 0.03, 0, 1);
+  }
+
   const xRange = Math.max(1, timeline.length - 1);
   const toX = (index: number) => left + (index / xRange) * chartWidth;
   const toY = (value: number) => top + (1 - (value - yMin) / (yMax - yMin)) * chartHeight;
@@ -228,10 +254,10 @@ export default function DimensionPredictionTimeline({
           />
 
           <text x={left} y={12} fill="var(--text-muted)" fontSize="10">
-            1.0
+            {formatValueLabel(yMax)}
           </text>
           <text x={left} y={height - bottom - 4} fill="var(--text-muted)" fontSize="10">
-            0.0
+            {formatValueLabel(yMin)}
           </text>
 
           <text x={left} y={height - bottom + 18} fill="var(--text-muted)" fontSize="10">
